@@ -1,0 +1,16 @@
+[package]
+name = "curatarr-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+curatarr-core = { workspace = true }
+sqlx = { workspace = true }
+async-trait = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+rstest = { workspace = true }
+tokio = { workspace = true }

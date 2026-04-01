@@ -1,0 +1,15 @@
+[package]
+name = "curatarr-bin"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+curatarr-api = { workspace = true }
+curatarr-config = { workspace = true }
+curatarr-db = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }

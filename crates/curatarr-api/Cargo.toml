@@ -1,0 +1,22 @@
+[package]
+name = "curatarr-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+curatarr-core = { workspace = true }
+curatarr-db = { workspace = true }
+curatarr-config = { workspace = true }
+curatarr-scanner = { workspace = true }
+axum = { workspace = true }
+tokio = { workspace = true }
+tower-http = { workspace = true }
+tracing = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+rstest = { workspace = true }
