@@ -20,3 +20,7 @@ serde_json = { workspace = true }
 [dev-dependencies]
 proptest = { workspace = true }
 rstest = { workspace = true }
+tokio = { workspace = true }
+curatarr-db = { workspace = true }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

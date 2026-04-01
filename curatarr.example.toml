@@ -1,0 +1,33 @@
+# curatarr configuration
+# Copy to curatarr.toml and adjust as needed.
+# All values shown are defaults.
+# Environment variables override file values using prefix CURATARR
+# with __ as separator (e.g. CURATARR__SERVER__PORT=9090).
+
+[server]
+host = "0.0.0.0"
+port = 8787
+
+[database]
+# backend: "sqlite" or "postgres"
+backend = "sqlite"
+url = "sqlite://curatarr.db?mode=rwc"
+max_connections = 5
+
+[library]
+naming_template = "{Author}/{Series}/{SeriesPositionPadded} - {Title}.{Extension}"
+# import_mode: "copy", "move", or "hardlink"
+import_mode = "copy"
+exclusions = ["*.tmp", ".DS_Store", "._*", "Thumbs.db"]
+
+# Add root folders where your books are stored:
+# [[library.root_folders]]
+# path = "/path/to/books"
+# name = "Main Library"
+# content_types = ["book", "comic", "manga"]
+
+[log]
+level = "info"
+# format: "pretty" or "json"
+format = "pretty"
+# file = "/var/log/curatarr/curatarr.log"

@@ -96,6 +96,12 @@ pub enum ImportMode {
     Hardlink,
 }
 
+impl Default for ImportMode {
+    fn default() -> Self {
+        Self::Copy
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AuthorRole {

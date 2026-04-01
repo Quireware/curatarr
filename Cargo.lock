@@ -622,11 +622,13 @@ dependencies = [
  "curatarr-core",
  "curatarr-db",
  "curatarr-scanner",
+ "http-body-util",
  "proptest",
  "rstest",
  "serde",
  "serde_json",
  "tokio",
+ "tower",
  "tower-http",
  "tracing",
 ]
@@ -635,6 +637,7 @@ dependencies = [
 name = "curatarr-bin"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "clap",
  "curatarr-api",
  "curatarr-config",
@@ -653,6 +656,7 @@ dependencies = [
  "proptest",
  "rstest",
  "serde",
+ "tempfile",
  "toml 0.8.23",
 ]
 
@@ -676,11 +680,16 @@ name = "curatarr-db"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "chrono",
  "curatarr-core",
  "proptest",
  "rstest",
+ "serde",
+ "serde_json",
  "sqlx",
  "tokio",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

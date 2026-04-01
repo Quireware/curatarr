@@ -9,6 +9,7 @@ rust-version.workspace = true
 curatarr-api = { workspace = true }
 curatarr-config = { workspace = true }
 curatarr-db = { workspace = true }
+axum = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
