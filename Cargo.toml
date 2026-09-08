@@ -60,6 +60,14 @@ image = "0.25"
 # Hashing
 sha2 = "0.10"
 
+# Filesystem
+walkdir = "2"
+globset = "0.4"
+fs2 = "0.4"
+
+# String similarity
+strsim = "0.11"
+
 # Testing
 proptest = "1"
 rstest = "0.25"

@@ -5,10 +5,16 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[[bin]]
+name = "curatarr"
+path = "src/main.rs"
+
 [dependencies]
 curatarr-api = { workspace = true }
 curatarr-config = { workspace = true }
 curatarr-db = { workspace = true }
+curatarr-core = { workspace = true }
+curatarr-scanner = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }

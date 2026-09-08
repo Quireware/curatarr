@@ -1,4 +1,10 @@
 pub mod cover;
+pub mod duplicates;
 pub mod extractors;
 pub mod format;
+mod fsops;
 pub mod hash;
+pub mod import;
+pub mod naming;
+pub mod recycle;
+pub mod scanner;

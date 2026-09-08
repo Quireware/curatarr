@@ -16,10 +16,14 @@ tower-http = { workspace = true }
 tracing = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+fs2 = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
 rstest = { workspace = true }
+tempfile = { workspace = true }
 tokio = { workspace = true }
 curatarr-db = { workspace = true }
 tower = { version = "0.5", features = ["util"] }

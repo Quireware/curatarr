@@ -19,6 +19,10 @@ naming_template = "{Author}/{Series}/{SeriesPositionPadded} - {Title}.{Extension
 # import_mode: "copy", "move", or "hardlink"
 import_mode = "copy"
 exclusions = ["*.tmp", ".DS_Store", "._*", "Thumbs.db"]
+# Where curatarr stores covers (data_dir/covers) and the recycle bin (data_dir/recycle)
+data_dir = "./data"
+# Days a soft-deleted file is kept in the recycle bin before permanent removal
+recycle_retention_days = 30
 
 # Add root folders where your books are stored:
 # [[library.root_folders]]

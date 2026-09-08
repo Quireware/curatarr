@@ -16,6 +16,8 @@ pub struct ComicMetadata {
     pub artist: Option<String>,
     pub year: Option<String>,
     pub cover_data: Option<Vec<u8>>,
+    /// Set when ComicInfo.xml declares `<Manga>Yes</Manga>` or `YesAndRightToLeft`.
+    pub manga: bool,
 }
 
 pub fn extract_comic_metadata(
@@ -94,6 +96,10 @@ fn parse_comicinfo_xml(xml: &str, _path: &Path) -> ComicMetadata {
                         "Writer" => meta.writer = Some(text),
                         "Penciller" | "Artist" => meta.artist = Some(text),
                         "Year" => meta.year = Some(text),
+                        "Manga" => {
+                            meta.manga = text.eq_ignore_ascii_case("yes")
+                                || text.eq_ignore_ascii_case("yesandrighttoleft")
+                        }
                         _ => {}
                     }
                 }

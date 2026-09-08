@@ -12,6 +12,8 @@ use curatarr_core::types::enums::AuthorRole;
 use curatarr_core::types::file::{FileFilter, LibraryFile, LibraryFileUpdate, NewLibraryFile};
 use curatarr_core::types::id::*;
 use curatarr_core::types::publisher::{NewPublisher, Publisher, PublisherFilter, PublisherUpdate};
+use curatarr_core::types::recycle::{NewRecycleEntry, RecycleEntry};
+use curatarr_core::types::root_folder::{NewRootFolder, RootFolder};
 use curatarr_core::types::series::{
     NewSeries, NewSeriesEntry, Series, SeriesEntry, SeriesFilter, SeriesUpdate,
 };
@@ -69,6 +71,78 @@ fn de_enum<T: serde::de::DeserializeOwned>(s: &str) -> T {
 
 fn offset_for(page: &Pagination) -> i64 {
     i64::from(page.page.saturating_sub(1)) * i64::from(page.per_page)
+}
+
+/// Accumulates `SET col = ?` fragments with their (nullable) text binds for dynamic UPDATEs.
+/// SQLite column affinity converts text binds to INTEGER/REAL where the schema says so.
+struct UpdateSet {
+    sets: Vec<String>,
+    binds: Vec<Option<String>>,
+}
+
+impl UpdateSet {
+    fn new() -> Self {
+        Self {
+            sets: vec!["updated_at = ?".to_string()],
+            binds: vec![Some(now_iso())],
+        }
+    }
+
+    /// Required field: `Some(value)` means "set", `None` means "leave unchanged".
+    fn set<T: ToString>(&mut self, col: &str, value: Option<&T>) {
+        if let Some(v) = value {
+            self.sets.push(format!("{col} = ?"));
+            self.binds.push(Some(v.to_string()));
+        }
+    }
+
+    /// Nullable field: outer `Some` means "set", inner `None` means "set NULL".
+    fn set_nullable<T: ToString>(&mut self, col: &str, value: Option<&Option<T>>) {
+        if let Some(v) = value {
+            self.sets.push(format!("{col} = ?"));
+            self.binds.push(v.as_ref().map(ToString::to_string));
+        }
+    }
+
+    async fn execute(self, pool: &SqlitePool, table: &str, id: &str) -> Result<(), DbError> {
+        let sql = format!("UPDATE {table} SET {} WHERE id = ?", self.sets.join(", "));
+        let mut q = sqlx::query(&sql);
+        for b in &self.binds {
+            q = q.bind(b);
+        }
+        q = q.bind(id);
+        q.execute(pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        Ok(())
+    }
+}
+
+fn json_string<T: serde::Serialize>(value: &T) -> String {
+    serde_json::to_string(value).unwrap_or_default()
+}
+
+fn root_folder_from_row(row: &sqlx::sqlite::SqliteRow) -> RootFolder {
+    let content_types_json: Option<String> = row.get("content_types");
+    RootFolder {
+        id: RootFolderId::from_uuid(parse_uuid(row.get("id"))),
+        path: row.get("path"),
+        name: row.get("name"),
+        content_types: content_types_json
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default(),
+        created_at: parse_dt(row.get("created_at")),
+    }
+}
+
+fn recycle_entry_from_row(row: &sqlx::sqlite::SqliteRow) -> RecycleEntry {
+    RecycleEntry {
+        id: RecycleEntryId::from_uuid(parse_uuid(row.get("id"))),
+        original_file_id: FileId::from_uuid(parse_uuid(row.get("original_file_id"))),
+        original_path: row.get("original_path"),
+        recycle_path: row.get("recycle_path"),
+        deleted_at: parse_dt(row.get("deleted_at")),
+    }
 }
 
 fn work_from_row(row: &sqlx::sqlite::SqliteRow) -> Work {
@@ -347,40 +421,37 @@ impl Repository for SqliteRepository {
     }
 
     async fn update_work(&self, id: WorkId, update: &WorkUpdate) -> Result<Work, DbError> {
-        let mut sets = vec!["updated_at = ?".to_string()];
-        let mut binds: Vec<String> = vec![now_iso()];
-
-        if let Some(title) = &update.title {
-            sets.push("title = ?".into());
-            binds.push(title.clone()); // clone: building dynamic query bind list
-        }
-        if let Some(sort_title) = &update.sort_title {
-            sets.push("sort_title = ?".into());
-            binds.push(sort_title.clone()); // clone: building dynamic query bind list
-        }
-        if let Some(ct) = &update.content_type {
-            sets.push("content_type = ?".into());
-            binds.push(ser_enum(ct));
-        }
-        if let Some(rs) = &update.read_status {
-            sets.push("read_status = ?".into());
-            binds.push(ser_enum(rs));
-        }
-        if let Some(warnings) = &update.content_warnings {
-            sets.push("content_warnings = ?".into());
-            binds.push(serde_json::to_string(warnings).unwrap_or_default());
-        }
-
-        let sql = format!("UPDATE works SET {} WHERE id = ?", sets.join(", "));
-        let mut q = sqlx::query(&sql);
-        for b in &binds {
-            q = q.bind(b);
-        }
-        q = q.bind(id.to_string());
-
-        q.execute(&self.pool)
-            .await
-            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        let mut u = UpdateSet::new();
+        u.set("title", update.title.as_ref());
+        u.set("sort_title", update.sort_title.as_ref());
+        u.set_nullable("original_language", update.original_language.as_ref());
+        u.set_nullable("original_pub_date", update.original_pub_date.as_ref());
+        u.set_nullable("description", update.description.as_ref());
+        u.set_nullable("description_html", update.description_html.as_ref());
+        u.set(
+            "content_type",
+            update.content_type.map(|v| ser_enum(&v)).as_ref(),
+        );
+        u.set_nullable(
+            "age_rating",
+            update
+                .age_rating
+                .map(|inner| inner.map(|v| ser_enum(&v)))
+                .as_ref(),
+        );
+        u.set(
+            "content_warnings",
+            update.content_warnings.as_ref().map(json_string).as_ref(),
+        );
+        u.set_nullable("average_rating", update.average_rating.as_ref());
+        u.set_nullable("user_rating", update.user_rating.as_ref());
+        u.set_nullable("user_review", update.user_review.as_ref());
+        u.set(
+            "read_status",
+            update.read_status.map(|v| ser_enum(&v)).as_ref(),
+        );
+        u.set_nullable("user_notes", update.user_notes.as_ref());
+        u.execute(&self.pool, "works", &id.to_string()).await?;
 
         self.get_work(id).await?.ok_or(DbError::NotFound {
             entity: "work",
@@ -484,23 +555,42 @@ impl Repository for SqliteRepository {
         id: EditionId,
         update: &EditionUpdate,
     ) -> Result<Edition, DbError> {
-        let mut sets = vec!["updated_at = ?".to_string()];
-        let mut binds: Vec<String> = vec![now_iso()];
-
-        if let Some(fmt) = &update.format {
-            sets.push("format = ?".into());
-            binds.push(ser_enum(fmt));
-        }
-
-        let sql = format!("UPDATE editions SET {} WHERE id = ?", sets.join(", "));
-        let mut q = sqlx::query(&sql);
-        for b in &binds {
-            q = q.bind(b);
-        }
-        q = q.bind(id.to_string());
-        q.execute(&self.pool)
-            .await
-            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        let mut u = UpdateSet::new();
+        u.set_nullable(
+            "isbn13",
+            update
+                .isbn13
+                .as_ref()
+                .map(|inner| inner.as_ref().map(|v| v.as_str().to_string()))
+                .as_ref(),
+        );
+        u.set_nullable(
+            "isbn10",
+            update
+                .isbn10
+                .as_ref()
+                .map(|inner| inner.as_ref().map(|v| v.as_str().to_string()))
+                .as_ref(),
+        );
+        u.set_nullable(
+            "asin",
+            update
+                .asin
+                .as_ref()
+                .map(|inner| inner.as_ref().map(|v| v.as_str().to_string()))
+                .as_ref(),
+        );
+        u.set_nullable("publisher_id", update.publisher_id.as_ref());
+        u.set_nullable("imprint", update.imprint.as_ref());
+        u.set_nullable("publication_date", update.publication_date.as_ref());
+        u.set_nullable("edition_number", update.edition_number.as_ref());
+        u.set("format", update.format.map(|v| ser_enum(&v)).as_ref());
+        u.set_nullable("page_count", update.page_count.as_ref());
+        u.set_nullable("word_count", update.word_count.as_ref());
+        u.set_nullable("language", update.language.as_ref());
+        u.set_nullable("translator", update.translator.as_ref());
+        u.set_nullable("cover_path", update.cover_path.as_ref());
+        u.execute(&self.pool, "editions", &id.to_string()).await?;
 
         self.get_edition(id).await?.ok_or(DbError::NotFound {
             entity: "edition",
@@ -589,27 +679,16 @@ impl Repository for SqliteRepository {
     }
 
     async fn update_author(&self, id: AuthorId, update: &AuthorUpdate) -> Result<Author, DbError> {
-        let mut sets = vec!["updated_at = ?".to_string()];
-        let mut binds: Vec<String> = vec![now_iso()];
-
-        if let Some(name) = &update.name {
-            sets.push("name = ?".into());
-            binds.push(name.clone()); // clone: dynamic bind list
-        }
-        if let Some(sort_name) = &update.sort_name {
-            sets.push("sort_name = ?".into());
-            binds.push(sort_name.clone()); // clone: dynamic bind list
-        }
-
-        let sql = format!("UPDATE authors SET {} WHERE id = ?", sets.join(", "));
-        let mut q = sqlx::query(&sql);
-        for b in &binds {
-            q = q.bind(b);
-        }
-        q = q.bind(id.to_string());
-        q.execute(&self.pool)
-            .await
-            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        let mut u = UpdateSet::new();
+        u.set("name", update.name.as_ref());
+        u.set("sort_name", update.sort_name.as_ref());
+        u.set_nullable("birth_date", update.birth_date.as_ref());
+        u.set_nullable("death_date", update.death_date.as_ref());
+        u.set_nullable("nationality", update.nationality.as_ref());
+        u.set_nullable("biography", update.biography.as_ref());
+        u.set_nullable("biography_html", update.biography_html.as_ref());
+        u.set_nullable("photo_path", update.photo_path.as_ref());
+        u.execute(&self.pool, "authors", &id.to_string()).await?;
 
         self.get_author(id).await?.ok_or(DbError::NotFound {
             entity: "author",
@@ -736,23 +815,24 @@ impl Repository for SqliteRepository {
     }
 
     async fn update_series(&self, id: SeriesId, update: &SeriesUpdate) -> Result<Series, DbError> {
-        let mut sets = vec!["updated_at = ?".to_string()];
-        let mut binds: Vec<String> = vec![now_iso()];
-
-        if let Some(title) = &update.title {
-            sets.push("title = ?".into());
-            binds.push(title.clone()); // clone: dynamic bind list
-        }
-
-        let sql = format!("UPDATE series SET {} WHERE id = ?", sets.join(", "));
-        let mut q = sqlx::query(&sql);
-        for b in &binds {
-            q = q.bind(b);
-        }
-        q = q.bind(id.to_string());
-        q.execute(&self.pool)
-            .await
-            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        let mut u = UpdateSet::new();
+        u.set("title", update.title.as_ref());
+        u.set("sort_title", update.sort_title.as_ref());
+        u.set_nullable("description", update.description.as_ref());
+        u.set(
+            "series_type",
+            update.series_type.map(|v| ser_enum(&v)).as_ref(),
+        );
+        u.set(
+            "reading_order",
+            update.reading_order.map(|v| ser_enum(&v)).as_ref(),
+        );
+        u.set_nullable("volume_count", update.volume_count.as_ref());
+        u.set_nullable(
+            "expected_volume_count",
+            update.expected_volume_count.as_ref(),
+        );
+        u.execute(&self.pool, "series", &id.to_string()).await?;
 
         self.get_series(id).await?.ok_or(DbError::NotFound {
             entity: "series",
@@ -889,23 +969,14 @@ impl Repository for SqliteRepository {
         id: PublisherId,
         update: &PublisherUpdate,
     ) -> Result<Publisher, DbError> {
-        let mut sets = vec!["updated_at = ?".to_string()];
-        let mut binds: Vec<String> = vec![now_iso()];
-
-        if let Some(name) = &update.name {
-            sets.push("name = ?".into());
-            binds.push(name.clone()); // clone: dynamic bind list
-        }
-
-        let sql = format!("UPDATE publishers SET {} WHERE id = ?", sets.join(", "));
-        let mut q = sqlx::query(&sql);
-        for b in &binds {
-            q = q.bind(b);
-        }
-        q = q.bind(id.to_string());
-        q.execute(&self.pool)
-            .await
-            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        let mut u = UpdateSet::new();
+        u.set("name", update.name.as_ref());
+        u.set("sort_name", update.sort_name.as_ref());
+        u.set_nullable("imprint", update.imprint.as_ref());
+        u.set_nullable("parent_publisher_id", update.parent_publisher_id.as_ref());
+        u.set_nullable("country", update.country.as_ref());
+        u.set_nullable("founding_year", update.founding_year.as_ref());
+        u.execute(&self.pool, "publishers", &id.to_string()).await?;
 
         self.get_publisher(id).await?.ok_or(DbError::NotFound {
             entity: "publisher",
@@ -1221,23 +1292,16 @@ impl Repository for SqliteRepository {
         id: FileId,
         update: &LibraryFileUpdate,
     ) -> Result<LibraryFile, DbError> {
-        let mut sets = vec!["updated_at = ?".to_string()];
-        let mut binds: Vec<String> = vec![now_iso()];
-
-        if let Some(path) = &update.path {
-            sets.push("path = ?".into());
-            binds.push(path.clone()); // clone: dynamic bind list
-        }
-
-        let sql = format!("UPDATE files SET {} WHERE id = ?", sets.join(", "));
-        let mut q = sqlx::query(&sql);
-        for b in &binds {
-            q = q.bind(b);
-        }
-        q = q.bind(id.to_string());
-        q.execute(&self.pool)
-            .await
-            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        let mut u = UpdateSet::new();
+        u.set("path", update.path.as_ref());
+        u.set_nullable(
+            "deleted_at",
+            update
+                .deleted_at
+                .map(|inner| inner.map(|dt| dt.format("%Y-%m-%dT%H:%M:%S%.6fZ").to_string()))
+                .as_ref(),
+        );
+        u.execute(&self.pool, "files", &id.to_string()).await?;
 
         self.get_file(id).await?.ok_or(DbError::NotFound {
             entity: "file",
@@ -1262,6 +1326,164 @@ impl Repository for SqliteRepository {
             .map_err(|e| DbError::Internal(Box::new(e)))?;
 
         Ok(row.as_ref().map(file_from_row))
+    }
+
+    async fn find_file_by_path(&self, path: &str) -> Result<Option<LibraryFile>, DbError> {
+        let row = sqlx::query("SELECT * FROM files WHERE path = ?")
+            .bind(path)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+
+        Ok(row.as_ref().map(file_from_row))
+    }
+
+    async fn list_work_authors(&self, work_id: WorkId) -> Result<Vec<Author>, DbError> {
+        let rows = sqlx::query(
+            "SELECT a.* FROM authors a
+             INNER JOIN work_authors wa ON wa.author_id = a.id
+             WHERE wa.work_id = ?
+             ORDER BY wa.rowid ASC",
+        )
+        .bind(work_id.to_string())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DbError::Internal(Box::new(e)))?;
+
+        Ok(rows.iter().map(author_from_row).collect())
+    }
+
+    async fn list_work_series_entries(&self, work_id: WorkId) -> Result<Vec<SeriesEntry>, DbError> {
+        let rows =
+            sqlx::query("SELECT * FROM series_entries WHERE work_id = ? ORDER BY position ASC")
+                .bind(work_id.to_string())
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| DbError::Internal(Box::new(e)))?;
+
+        Ok(rows.iter().map(series_entry_from_row).collect())
+    }
+
+    // --- Root folders ---
+
+    async fn create_root_folder(&self, folder: &NewRootFolder) -> Result<RootFolder, DbError> {
+        let id = RootFolderId::new();
+        let now = now_iso();
+
+        sqlx::query(
+            "INSERT INTO root_folders (id, path, name, content_types, created_at)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(id.to_string())
+        .bind(&folder.path)
+        .bind(&folder.name)
+        .bind(json_string(&folder.content_types))
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(map_unique_violation)?;
+
+        self.get_root_folder(id).await?.ok_or(DbError::NotFound {
+            entity: "root_folder",
+            id: id.to_string(),
+        })
+    }
+
+    async fn get_root_folder(&self, id: RootFolderId) -> Result<Option<RootFolder>, DbError> {
+        let row = sqlx::query("SELECT * FROM root_folders WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+
+        Ok(row.as_ref().map(root_folder_from_row))
+    }
+
+    async fn list_root_folders(&self) -> Result<Vec<RootFolder>, DbError> {
+        let rows = sqlx::query("SELECT * FROM root_folders ORDER BY created_at ASC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+
+        Ok(rows.iter().map(root_folder_from_row).collect())
+    }
+
+    async fn delete_root_folder(&self, id: RootFolderId) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM root_folders WHERE id = ?")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        Ok(())
+    }
+
+    // --- Recycle bin ---
+
+    async fn create_recycle_entry(&self, entry: &NewRecycleEntry) -> Result<RecycleEntry, DbError> {
+        let id = RecycleEntryId::new();
+        let now = now_iso();
+
+        sqlx::query(
+            "INSERT INTO recycle_bin (id, original_file_id, original_path, recycle_path, deleted_at)
+             VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(id.to_string())
+        .bind(entry.original_file_id.to_string())
+        .bind(&entry.original_path)
+        .bind(&entry.recycle_path)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| DbError::Internal(Box::new(e)))?;
+
+        let row = sqlx::query("SELECT * FROM recycle_bin WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+
+        Ok(recycle_entry_from_row(&row))
+    }
+
+    async fn get_recycle_entry_for_file(
+        &self,
+        file_id: FileId,
+    ) -> Result<Option<RecycleEntry>, DbError> {
+        let row = sqlx::query("SELECT * FROM recycle_bin WHERE original_file_id = ?")
+            .bind(file_id.to_string())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+
+        Ok(row.as_ref().map(recycle_entry_from_row))
+    }
+
+    async fn list_recycle_entries(&self) -> Result<Vec<RecycleEntry>, DbError> {
+        let rows = sqlx::query("SELECT * FROM recycle_bin ORDER BY deleted_at ASC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+
+        Ok(rows.iter().map(recycle_entry_from_row).collect())
+    }
+
+    async fn delete_recycle_entry(&self, id: RecycleEntryId) -> Result<(), DbError> {
+        sqlx::query("DELETE FROM recycle_bin WHERE id = ?")
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        Ok(())
+    }
+}
+
+/// Map a SQLite UNIQUE violation to `DbError::Conflict`, everything else to `Internal`.
+fn map_unique_violation(e: sqlx::Error) -> DbError {
+    match &e {
+        sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
+            DbError::Conflict(db_err.message().to_string())
+        }
+        _ => DbError::Internal(Box::new(e)),
     }
 }
 

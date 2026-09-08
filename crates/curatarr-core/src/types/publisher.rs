@@ -30,9 +30,13 @@ pub struct NewPublisher {
 pub struct PublisherUpdate {
     pub name: Option<String>,
     pub sort_name: Option<String>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub imprint: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub parent_publisher_id: Option<Option<PublisherId>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub country: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub founding_year: Option<Option<i32>>,
 }
 

@@ -62,6 +62,21 @@ pub enum ScannerError {
         expected: String,
         actual: String,
     },
+
+    #[error("invalid naming template '{template}': {reason}")]
+    InvalidTemplate { template: String, reason: String },
+
+    #[error("invalid exclusion pattern '{pattern}': {reason}")]
+    InvalidExclusion { pattern: String, reason: String },
+
+    #[error("file already in recycle bin: {0}")]
+    AlreadyRecycled(String),
+
+    #[error("file is not in recycle bin: {0}")]
+    NotRecycled(String),
+
+    #[error(transparent)]
+    Database(#[from] DbError),
 }
 
 #[cfg(test)]
@@ -178,9 +193,7 @@ mod tests {
         let display = error.to_string();
         assert!(
             display.contains(expected_substring),
-            "Expected '{}' to contain '{}'",
-            display,
-            expected_substring
+            "Expected '{display}' to contain '{expected_substring}'"
         );
     }
 

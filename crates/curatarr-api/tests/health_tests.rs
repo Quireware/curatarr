@@ -1,13 +1,14 @@
 use axum::http::{Request, StatusCode};
 use curatarr_api::router::build_router;
 use curatarr_api::state::AppState;
+use curatarr_config::library::LibraryConfig;
 use curatarr_db::create_repository;
 use http_body_util::BodyExt;
 use tower::ServiceExt;
 
 async fn test_app() -> axum::Router {
     let db = create_repository("sqlite::memory:").await.unwrap();
-    build_router(AppState { db })
+    build_router(AppState::new(db, LibraryConfig::default()))
 }
 
 #[tokio::test]

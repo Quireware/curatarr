@@ -30,6 +30,7 @@ pub struct NewLibraryFile {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct LibraryFileUpdate {
     pub path: Option<String>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub deleted_at: Option<Option<DateTime<Utc>>>,
 }
 

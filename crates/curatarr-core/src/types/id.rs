@@ -60,6 +60,8 @@ entity_id!(PublisherId);
 entity_id!(CollectionId);
 entity_id!(TagId);
 entity_id!(FileId);
+entity_id!(RootFolderId);
+entity_id!(RecycleEntryId);
 
 #[cfg(test)]
 mod tests {

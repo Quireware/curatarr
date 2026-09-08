@@ -14,6 +14,8 @@ pub struct EpubMetadata {
     pub publisher: Option<String>,
     pub pub_date: Option<String>,
     pub cover_path: Option<String>,
+    pub series: Option<String>,
+    pub series_position: Option<f64>,
 }
 
 pub fn extract_epub_metadata(path: &Path) -> Result<EpubMetadata, ScannerError> {
@@ -183,10 +185,68 @@ fn handle_meta_element(e: &quick_xml::events::BytesStart<'_>, meta: &mut EpubMet
     }
 
     if let (Some(name), Some(content)) = (name_val, content_val) {
-        if name == "cover" {
-            meta.cover_path = Some(content);
+        match name.as_str() {
+            "cover" => meta.cover_path = Some(content),
+            "calibre:series" => meta.series = Some(content),
+            "calibre:series_index" => meta.series_position = content.trim().parse().ok(),
+            _ => {}
         }
     }
+}
+
+/// Read the cover image bytes referenced by `meta.cover_path` (an href relative to the OPF
+/// directory). Falls back to the first manifest-independent entry whose name contains "cover"
+/// and has an image extension. Returns `None` when no cover can be found or read.
+pub fn extract_epub_cover(path: &Path, meta: &EpubMetadata) -> Option<Vec<u8>> {
+    let file = std::fs::File::open(path).ok()?;
+    let mut archive = zip::ZipArchive::new(file).ok()?;
+
+    if let Some(href) = &meta.cover_path {
+        let opf_path = find_opf_path(&mut archive, path).ok()?;
+        let opf_dir = opf_path.rsplit_once('/').map(|(dir, _)| dir).unwrap_or("");
+        let candidate = normalise_zip_path(opf_dir, href);
+        if let Some(bytes) = read_zip_bytes(&mut archive, &candidate) {
+            return Some(bytes);
+        }
+    }
+
+    let fallback = (0..archive.len())
+        .filter_map(|i| archive.by_index(i).ok().map(|e| e.name().to_string()))
+        .find(|name| {
+            let lower = name.to_lowercase();
+            lower.contains("cover") && is_image_name(&lower)
+        })?;
+    read_zip_bytes(&mut archive, &fallback)
+}
+
+fn is_image_name(lower: &str) -> bool {
+    lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".png")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".gif")
+}
+
+fn read_zip_bytes(archive: &mut zip::ZipArchive<std::fs::File>, name: &str) -> Option<Vec<u8>> {
+    let mut entry = archive.by_name(name).ok()?;
+    let mut data = Vec::new();
+    entry.read_to_end(&mut data).ok()?;
+    if data.is_empty() { None } else { Some(data) }
+}
+
+/// Join an href onto a directory inside the zip, resolving `.` and `..` segments.
+fn normalise_zip_path(dir: &str, href: &str) -> String {
+    let mut segments: Vec<&str> = dir.split('/').filter(|s| !s.is_empty()).collect();
+    for seg in href.split('/') {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                segments.pop();
+            }
+            other => segments.push(other),
+        }
+    }
+    segments.join("/")
 }
 
 fn handle_item_element(e: &quick_xml::events::BytesStart<'_>, meta: &mut EpubMetadata) {
