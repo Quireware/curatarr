@@ -1,6 +1,7 @@
 pub mod database;
 pub mod library;
 pub mod logging;
+pub mod metadata;
 pub mod server;
 
 use curatarr_core::error::ConfigError;
@@ -10,6 +11,7 @@ use std::path::Path;
 use database::DatabaseConfig;
 use library::LibraryConfig;
 use logging::LogConfig;
+use metadata::MetadataConfig;
 use server::ServerConfig;
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -22,6 +24,8 @@ pub struct AppConfig {
     pub library: LibraryConfig,
     #[serde(default)]
     pub log: LogConfig,
+    #[serde(default)]
+    pub metadata: MetadataConfig,
 }
 
 impl AppConfig {

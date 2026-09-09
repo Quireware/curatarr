@@ -21,5 +21,6 @@ pub struct NewTag {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct TagUpdate {
     pub name: Option<String>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub parent_id: Option<Option<TagId>>,
 }

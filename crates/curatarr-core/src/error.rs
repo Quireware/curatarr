@@ -62,6 +62,45 @@ pub enum ScannerError {
         expected: String,
         actual: String,
     },
+
+    #[error("invalid naming template '{template}': {reason}")]
+    InvalidTemplate { template: String, reason: String },
+
+    #[error("invalid exclusion pattern '{pattern}': {reason}")]
+    InvalidExclusion { pattern: String, reason: String },
+
+    #[error("file already in recycle bin: {0}")]
+    AlreadyRecycled(String),
+
+    #[error("file is not in recycle bin: {0}")]
+    NotRecycled(String),
+
+    #[error(transparent)]
+    Database(#[from] DbError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ProviderError {
+    #[error("provider {provider} is disabled: {reason}")]
+    Disabled { provider: String, reason: String },
+
+    #[error("provider {provider} requires an API key")]
+    MissingApiKey { provider: String },
+
+    #[error("rate limited by {provider}")]
+    RateLimited { provider: String },
+
+    #[error("not found at {provider}: {id}")]
+    NotFound { provider: String, id: String },
+
+    #[error("{provider} request failed: {reason}")]
+    Request { provider: String, reason: String },
+
+    #[error("{provider} returned unexpected payload: {reason}")]
+    Parse { provider: String, reason: String },
+
+    #[error("{provider} does not support {feature}")]
+    Unsupported { provider: String, feature: String },
 }
 
 #[cfg(test)]
@@ -148,6 +187,27 @@ mod tests {
                 prop_assert!(!display.is_empty(), "Display was empty for {:?}", e);
             }
         }
+
+        #[test]
+        fn provider_error_display_non_empty(
+            provider in arb_non_empty_string(),
+            reason in arb_non_empty_string(),
+            id in arb_non_empty_string(),
+        ) {
+            let errors: Vec<ProviderError> = vec![
+                ProviderError::Disabled { provider: provider.clone(), reason: reason.clone() },
+                ProviderError::MissingApiKey { provider: provider.clone() },
+                ProviderError::RateLimited { provider: provider.clone() },
+                ProviderError::NotFound { provider: provider.clone(), id },
+                ProviderError::Request { provider: provider.clone(), reason: reason.clone() },
+                ProviderError::Parse { provider: provider.clone(), reason: reason.clone() },
+                ProviderError::Unsupported { provider, feature: reason },
+            ];
+            for e in &errors {
+                let display = e.to_string();
+                prop_assert!(!display.is_empty(), "Display was empty for {:?}", e);
+            }
+        }
     }
 
     #[rstest]
@@ -171,6 +231,10 @@ mod tests {
         ScannerError::UnsupportedFormat("txt".into()),
         "unsupported file format: txt"
     )]
+    #[case(
+        ProviderError::MissingApiKey { provider: "comicvine".into() },
+        "comicvine requires an API key"
+    )]
     fn error_messages_contain_expected_substring<E: std::error::Error>(
         #[case] error: E,
         #[case] expected_substring: &str,
@@ -178,9 +242,7 @@ mod tests {
         let display = error.to_string();
         assert!(
             display.contains(expected_substring),
-            "Expected '{}' to contain '{}'",
-            display,
-            expected_substring
+            "Expected '{display}' to contain '{expected_substring}'"
         );
     }
 

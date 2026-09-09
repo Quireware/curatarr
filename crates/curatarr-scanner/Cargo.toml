@@ -14,10 +14,14 @@ tracing = { workspace = true }
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = "0.37"
 lopdf = "0.34"
-walkdir = "2"
-globset = "0.4"
+walkdir = { workspace = true }
+globset = { workspace = true }
+strsim = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
 proptest = { workspace = true }
 rstest = { workspace = true }
 tempfile = { workspace = true }
+curatarr-db = { workspace = true }

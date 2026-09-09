@@ -6,9 +6,14 @@ use crate::types::collection::{Collection, CollectionUpdate, NewCollection};
 use crate::types::edition::{Edition, EditionFilter, EditionUpdate, NewEdition};
 use crate::types::file::{FileFilter, LibraryFile, LibraryFileUpdate, NewLibraryFile};
 use crate::types::id::{
-    AuthorId, CollectionId, EditionId, FileId, PublisherId, SeriesEntryId, SeriesId, TagId, WorkId,
+    AuthorId, CollectionId, EditionId, FileId, PublisherId, RecycleEntryId, RootFolderId,
+    SeriesEntryId, SeriesId, TagId, WorkId,
 };
+use crate::types::identifiers::ExternalId;
+use crate::types::metadata::{AuditEvent, EntityKind, FieldLock, FieldSource, NewAuditEvent};
 use crate::types::publisher::{NewPublisher, Publisher, PublisherFilter, PublisherUpdate};
+use crate::types::recycle::{NewRecycleEntry, RecycleEntry};
+use crate::types::root_folder::{NewRootFolder, RootFolder};
 use crate::types::series::{
     NewSeries, NewSeriesEntry, Series, SeriesEntry, SeriesFilter, SeriesUpdate,
 };
@@ -145,4 +150,81 @@ pub trait Repository: Send + Sync {
     ) -> Result<LibraryFile, DbError>;
     async fn delete_file(&self, id: FileId) -> Result<(), DbError>;
     async fn find_file_by_hash(&self, sha256: &str) -> Result<Option<LibraryFile>, DbError>;
+    async fn find_file_by_path(&self, path: &str) -> Result<Option<LibraryFile>, DbError>;
+    /// Authors linked to a work, in insertion order.
+    async fn list_work_authors(&self, work_id: WorkId) -> Result<Vec<Author>, DbError>;
+    /// Series entries for a work (a work may belong to several series).
+    async fn list_work_series_entries(&self, work_id: WorkId) -> Result<Vec<SeriesEntry>, DbError>;
+
+    // Root folders
+    async fn create_root_folder(&self, folder: &NewRootFolder) -> Result<RootFolder, DbError>;
+    async fn get_root_folder(&self, id: RootFolderId) -> Result<Option<RootFolder>, DbError>;
+    async fn list_root_folders(&self) -> Result<Vec<RootFolder>, DbError>;
+    async fn delete_root_folder(&self, id: RootFolderId) -> Result<(), DbError>;
+
+    // Recycle bin
+    async fn create_recycle_entry(&self, entry: &NewRecycleEntry) -> Result<RecycleEntry, DbError>;
+    async fn get_recycle_entry_for_file(
+        &self,
+        file_id: FileId,
+    ) -> Result<Option<RecycleEntry>, DbError>;
+    async fn list_recycle_entries(&self) -> Result<Vec<RecycleEntry>, DbError>;
+    async fn delete_recycle_entry(&self, id: RecycleEntryId) -> Result<(), DbError>;
+
+    async fn list_external_ids(
+        &self,
+        kind: EntityKind,
+        entity_id: &str,
+    ) -> Result<Vec<ExternalId>, DbError>;
+    async fn upsert_external_id(
+        &self,
+        kind: EntityKind,
+        entity_id: &str,
+        id: &ExternalId,
+    ) -> Result<(), DbError>;
+
+    async fn list_field_locks(
+        &self,
+        kind: EntityKind,
+        entity_id: &str,
+    ) -> Result<Vec<FieldLock>, DbError>;
+    async fn set_field_lock(
+        &self,
+        kind: EntityKind,
+        entity_id: &str,
+        field: &str,
+    ) -> Result<FieldLock, DbError>;
+    async fn clear_field_lock(
+        &self,
+        kind: EntityKind,
+        entity_id: &str,
+        field: &str,
+    ) -> Result<(), DbError>;
+    async fn clear_all_field_locks(&self, kind: EntityKind, entity_id: &str)
+    -> Result<(), DbError>;
+
+    async fn list_field_sources(
+        &self,
+        kind: EntityKind,
+        entity_id: &str,
+    ) -> Result<Vec<FieldSource>, DbError>;
+    async fn upsert_field_source(
+        &self,
+        kind: EntityKind,
+        entity_id: &str,
+        field: &str,
+        source: &str,
+    ) -> Result<(), DbError>;
+
+    async fn append_audit(&self, event: &NewAuditEvent) -> Result<AuditEvent, DbError>;
+    async fn list_audit(
+        &self,
+        kind: EntityKind,
+        entity_id: &str,
+        page: &Pagination,
+    ) -> Result<Page<AuditEvent>, DbError>;
+
+    async fn find_author_by_name(&self, name: &str) -> Result<Option<Author>, DbError>;
+    async fn find_series_by_title(&self, title: &str) -> Result<Option<Series>, DbError>;
+    async fn find_tag_by_name(&self, name: &str) -> Result<Option<Tag>, DbError>;
 }

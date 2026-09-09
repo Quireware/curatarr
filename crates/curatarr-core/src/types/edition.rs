@@ -45,18 +45,30 @@ pub struct NewEdition {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct EditionUpdate {
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub isbn13: Option<Option<Isbn13>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub isbn10: Option<Option<Isbn10>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub asin: Option<Option<Asin>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub publisher_id: Option<Option<PublisherId>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub imprint: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub publication_date: Option<Option<NaiveDate>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub edition_number: Option<Option<u32>>,
     pub format: Option<FileFormat>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub page_count: Option<Option<u32>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub word_count: Option<Option<u64>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub language: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub translator: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub cover_path: Option<Option<String>>,
 }
 

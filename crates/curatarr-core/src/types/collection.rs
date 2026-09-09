@@ -21,5 +21,6 @@ pub struct NewCollection {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct CollectionUpdate {
     pub name: Option<String>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub description: Option<Option<String>>,
 }

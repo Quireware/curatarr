@@ -1,1 +1,12 @@
+pub mod authors;
+pub mod common;
+pub mod duplicates;
+pub mod editions;
+pub mod files;
 pub mod health;
+pub mod metadata;
+pub mod publishers;
+pub mod root_folders;
+pub mod series;
+pub mod system;
+pub mod works;

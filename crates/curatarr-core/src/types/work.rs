@@ -43,17 +43,26 @@ pub struct NewWork {
 pub struct WorkUpdate {
     pub title: Option<String>,
     pub sort_title: Option<String>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub original_language: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub original_pub_date: Option<Option<NaiveDate>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub description: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub description_html: Option<Option<String>>,
     pub content_type: Option<ContentType>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub age_rating: Option<Option<AgeRating>>,
     pub content_warnings: Option<Vec<String>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub average_rating: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub user_rating: Option<Option<f64>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub user_review: Option<Option<String>>,
     pub read_status: Option<ReadStatus>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub user_notes: Option<Option<String>>,
 }
 

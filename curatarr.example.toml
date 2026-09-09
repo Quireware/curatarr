@@ -19,6 +19,10 @@ naming_template = "{Author}/{Series}/{SeriesPositionPadded} - {Title}.{Extension
 # import_mode: "copy", "move", or "hardlink"
 import_mode = "copy"
 exclusions = ["*.tmp", ".DS_Store", "._*", "Thumbs.db"]
+# Where curatarr stores covers (data_dir/covers) and the recycle bin (data_dir/recycle)
+data_dir = "./data"
+# Days a soft-deleted file is kept in the recycle bin before permanent removal
+recycle_retention_days = 30
 
 # Add root folders where your books are stored:
 # [[library.root_folders]]
@@ -31,3 +35,23 @@ level = "info"
 # format: "pretty" or "json"
 format = "pretty"
 # file = "/var/log/curatarr/curatarr.log"
+
+[metadata]
+# Minimum fuzzy score (0.0-1.0) to auto-apply a search hit
+match_threshold = 0.6
+# 0 disables the background refresh loop
+refresh_interval_hours = 0
+
+# Keyless providers are on by default. Keyed providers stay off until api_key is set.
+# [[metadata.providers]]
+# name = "openlibrary"
+# enabled = true
+# priority = 10
+# rate_limit_per_minute = 20
+#
+# [[metadata.providers]]
+# name = "comicvine"
+# enabled = true
+# priority = 10
+# api_key = "YOUR_KEY"
+# rate_limit_per_minute = 200

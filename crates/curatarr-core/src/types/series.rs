@@ -36,10 +36,13 @@ pub struct NewSeries {
 pub struct SeriesUpdate {
     pub title: Option<String>,
     pub sort_title: Option<String>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub description: Option<Option<String>>,
     pub series_type: Option<SeriesType>,
     pub reading_order: Option<ReadingOrder>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub volume_count: Option<Option<u32>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub expected_volume_count: Option<Option<u32>>,
     pub external_ids: Option<Vec<ExternalId>>,
 }

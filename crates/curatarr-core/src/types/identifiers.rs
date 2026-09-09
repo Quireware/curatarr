@@ -304,6 +304,99 @@ pub enum ExternalId {
     MyAnimeList(i32),
     LibraryThingWork(String),
     Oclc(String),
+    GoogleBooksVolume(String),
+    IsbnDb(String),
+}
+
+impl ExternalId {
+    pub fn provider_name(&self) -> &'static str {
+        match self {
+            Self::OpenLibraryWork(_) | Self::OpenLibraryEdition(_) => "openlibrary",
+            Self::GoodreadsWork(_) | Self::GoodreadsBook(_) => "goodreads",
+            Self::HardcoverId(_) => "hardcover",
+            Self::ComicvineVolume(_) | Self::ComicvineIssue(_) => "comicvine",
+            Self::AniListMedia(_) => "anilist",
+            Self::MangaUpdatesSeries(_) => "mangaupdates",
+            Self::MangaDexSeries(_) => "mangadex",
+            Self::MyAnimeList(_) => "myanimelist",
+            Self::LibraryThingWork(_) => "librarything",
+            Self::Oclc(_) => "oclc",
+            Self::GoogleBooksVolume(_) => "googlebooks",
+            Self::IsbnDb(_) => "isbndb",
+        }
+    }
+
+    pub fn storage_key(&self) -> &'static str {
+        match self {
+            Self::OpenLibraryWork(_) => "openlibrary",
+            Self::OpenLibraryEdition(_) => "openlibrary_edition",
+            Self::GoodreadsWork(_) => "goodreads",
+            Self::GoodreadsBook(_) => "goodreads_book",
+            Self::HardcoverId(_) => "hardcover",
+            Self::ComicvineVolume(_) => "comicvine",
+            Self::ComicvineIssue(_) => "comicvine_issue",
+            Self::AniListMedia(_) => "anilist",
+            Self::MangaUpdatesSeries(_) => "mangaupdates",
+            Self::MangaDexSeries(_) => "mangadex",
+            Self::MyAnimeList(_) => "myanimelist",
+            Self::LibraryThingWork(_) => "librarything",
+            Self::Oclc(_) => "oclc",
+            Self::GoogleBooksVolume(_) => "googlebooks",
+            Self::IsbnDb(_) => "isbndb",
+        }
+    }
+
+    pub fn value(&self) -> String {
+        match self {
+            Self::OpenLibraryWork(v)
+            | Self::OpenLibraryEdition(v)
+            | Self::GoodreadsWork(v)
+            | Self::GoodreadsBook(v)
+            | Self::HardcoverId(v)
+            | Self::ComicvineVolume(v)
+            | Self::ComicvineIssue(v)
+            | Self::MangaUpdatesSeries(v)
+            | Self::MangaDexSeries(v)
+            | Self::LibraryThingWork(v)
+            | Self::Oclc(v)
+            | Self::GoogleBooksVolume(v)
+            | Self::IsbnDb(v) => v.clone(), // clone: owned key for persistence
+            Self::AniListMedia(id) | Self::MyAnimeList(id) => id.to_string(),
+        }
+    }
+
+    pub fn from_provider(provider: &str, value: &str) -> Result<Self, CoreError> {
+        match provider {
+            "openlibrary" | "openlibrary_work" => Ok(Self::OpenLibraryWork(value.to_string())),
+            "openlibrary_edition" => Ok(Self::OpenLibraryEdition(value.to_string())),
+            "goodreads" | "goodreads_work" => Ok(Self::GoodreadsWork(value.to_string())),
+            "goodreads_book" => Ok(Self::GoodreadsBook(value.to_string())),
+            "hardcover" => Ok(Self::HardcoverId(value.to_string())),
+            "comicvine" | "comicvine_volume" => Ok(Self::ComicvineVolume(value.to_string())),
+            "comicvine_issue" => Ok(Self::ComicvineIssue(value.to_string())),
+            "anilist" => parse_i32_id(provider, value).map(Self::AniListMedia),
+            "mangaupdates" => Ok(Self::MangaUpdatesSeries(value.to_string())),
+            "mangadex" => Ok(Self::MangaDexSeries(value.to_string())),
+            "myanimelist" => parse_i32_id(provider, value).map(Self::MyAnimeList),
+            "librarything" => Ok(Self::LibraryThingWork(value.to_string())),
+            "oclc" => Ok(Self::Oclc(value.to_string())),
+            "googlebooks" => Ok(Self::GoogleBooksVolume(value.to_string())),
+            "isbndb" => Ok(Self::IsbnDb(value.to_string())),
+            other => Err(CoreError::InvalidIdentifier {
+                value: other.to_string(),
+                reason: "unknown metadata provider".into(),
+            }),
+        }
+    }
+}
+
+fn parse_i32_id(provider: &str, value: &str) -> Result<i32, CoreError> {
+    value
+        .parse::<i32>()
+        .map_err(|_| CoreError::InvalidIdentifier {
+            value: value.to_string(),
+            reason: format!("{provider} id must be an integer"),
+        })
 }
 
 #[cfg(test)]
@@ -463,11 +556,26 @@ mod tests {
             ExternalId::OpenLibraryWork("OL12345W".into()),
             ExternalId::AniListMedia(42),
             ExternalId::MangaDexSeries("abc-123".into()),
+            ExternalId::GoogleBooksVolume("abc".into()),
+            ExternalId::IsbnDb("9780306406157".into()),
         ];
         for id in &ids {
             let json = serde_json::to_string(id).unwrap();
             let back: ExternalId = serde_json::from_str(&json).unwrap();
             assert_eq!(*id, back);
         }
+    }
+
+    #[test]
+    fn from_provider_roundtrip() {
+        let id = ExternalId::from_provider("anilist", "42").unwrap();
+        assert_eq!(id, ExternalId::AniListMedia(42));
+        assert_eq!(id.provider_name(), "anilist");
+        assert_eq!(id.value(), "42");
+    }
+
+    #[test]
+    fn from_provider_rejects_unknown() {
+        assert!(ExternalId::from_provider("nope", "1").is_err());
     }
 }

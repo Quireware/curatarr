@@ -26,14 +26,17 @@ pub enum Command {
     },
     /// Run database migrations
     Migrate,
-    /// Scan a directory for books/comics/manga
+    /// Catalogue the books/comics/manga already in a directory, leaving files where they are
     Scan {
-        /// Directory path to scan
+        /// Directory to scan (registered as a root folder if it is not one yet)
         path: PathBuf,
     },
-    /// Import files from a directory into the library
+    /// Import files from a directory into the library, renaming them with the naming template
     Import {
-        /// Directory path to import from
+        /// Directory to import from
         path: PathBuf,
+        /// Library root folder to import into (defaults to the first configured root folder)
+        #[arg(long)]
+        into: Option<PathBuf>,
     },
 }

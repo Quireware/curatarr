@@ -36,11 +36,17 @@ pub struct NewAuthor {
 pub struct AuthorUpdate {
     pub name: Option<String>,
     pub sort_name: Option<String>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub birth_date: Option<Option<NaiveDate>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub death_date: Option<Option<NaiveDate>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub nationality: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub biography: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub biography_html: Option<Option<String>>,
+    #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub photo_path: Option<Option<String>>,
     pub external_ids: Option<Vec<ExternalId>>,
 }
