@@ -33,6 +33,7 @@ pub(crate) async fn get_json(
             url,
             headers,
             json_body: None,
+            form_body: None,
         })
         .await?;
     parse_json(provider, id, &response)
@@ -54,6 +55,7 @@ pub(crate) async fn post_json(
             url,
             headers,
             json_body: Some(body),
+            form_body: None,
         })
         .await?;
     parse_json(provider, id, &response)

@@ -21,6 +21,7 @@ pub struct Work {
     pub user_review: Option<String>,
     pub read_status: ReadStatus,
     pub user_notes: Option<String>,
+    pub monitored: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -37,6 +38,8 @@ pub struct NewWork {
     pub age_rating: Option<AgeRating>,
     pub content_warnings: Vec<String>,
     pub read_status: ReadStatus,
+    #[serde(default)]
+    pub monitored: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -64,6 +67,7 @@ pub struct WorkUpdate {
     pub read_status: Option<ReadStatus>,
     #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub user_notes: Option<Option<String>>,
+    pub monitored: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

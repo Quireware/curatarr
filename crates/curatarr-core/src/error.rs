@@ -103,6 +103,18 @@ pub enum ProviderError {
     Unsupported { provider: String, feature: String },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum IndexerError {
+    #[error(transparent)]
+    Http(#[from] ProviderError),
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ClientError {
+    #[error(transparent)]
+    Http(#[from] ProviderError),
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

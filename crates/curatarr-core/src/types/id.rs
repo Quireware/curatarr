@@ -62,6 +62,10 @@ entity_id!(TagId);
 entity_id!(FileId);
 entity_id!(RootFolderId);
 entity_id!(RecycleEntryId);
+entity_id!(QualityProfileId);
+entity_id!(QueueItemId);
+entity_id!(UserId);
+entity_id!(SessionId);
 
 #[cfg(test)]
 mod tests {

@@ -1,3 +1,5 @@
+pub mod acquire;
+pub mod auth;
 pub mod authors;
 pub mod common;
 pub mod duplicates;
@@ -9,4 +11,5 @@ pub mod publishers;
 pub mod root_folders;
 pub mod series;
 pub mod system;
+pub mod ui;
 pub mod works;

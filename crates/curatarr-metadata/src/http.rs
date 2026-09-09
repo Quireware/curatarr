@@ -16,12 +16,14 @@ pub struct HttpRequest<'a> {
     pub url: &'a Url,
     pub headers: &'a [(&'a str, &'a str)],
     pub json_body: Option<&'a Value>,
+    pub form_body: Option<&'a str>,
 }
 
 #[derive(Debug, Clone)]
 pub struct HttpResponse {
     pub status: u16,
     pub body: Vec<u8>,
+    pub headers: Vec<(String, String)>,
 }
 
 impl HttpResponse {
@@ -73,7 +75,11 @@ impl HttpClient for ReqwestHttp {
         for (name, value) in request.headers {
             builder = builder.header(*name, *value);
         }
-        if let Some(body) = request.json_body {
+        if let Some(form) = request.form_body {
+            builder = builder
+                .header("content-type", "application/x-www-form-urlencoded")
+                .body(form.to_string());
+        } else if let Some(body) = request.json_body {
             builder = builder.json(body);
         }
         let response = builder.send().await.map_err(|e| ProviderError::Request {
@@ -81,6 +87,15 @@ impl HttpClient for ReqwestHttp {
             reason: e.to_string(),
         })?;
         let status = response.status().as_u16();
+        let headers = response
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| {
+                v.to_str()
+                    .ok()
+                    .map(|val| (k.as_str().to_string(), val.to_string()))
+            })
+            .collect();
         let body = response
             .bytes()
             .await
@@ -89,29 +104,63 @@ impl HttpClient for ReqwestHttp {
                 reason: e.to_string(),
             })?
             .to_vec();
-        Ok(HttpResponse { status, body })
+        Ok(HttpResponse {
+            status,
+            body,
+            headers,
+        })
     }
+}
+
+#[derive(Debug, Clone)]
+pub struct RecordedRequest {
+    pub method: String,
+    pub url: String,
+    pub headers: Vec<(String, String)>,
+    pub body: Option<Value>,
+    pub form: Option<String>,
 }
 
 #[derive(Default)]
 pub struct MockHttp {
     routes: Mutex<HashMap<String, HttpResponse>>,
+    recorded: Mutex<Vec<RecordedRequest>>,
 }
 
 impl MockHttp {
     pub fn get(self, url: &str, body: &str) -> Self {
-        self.insert("GET", url, 200, body.as_bytes())
+        self.insert("GET", url, 200, body.as_bytes(), Vec::new())
     }
 
     pub fn post(self, url: &str, body: &str) -> Self {
-        self.insert("POST", url, 200, body.as_bytes())
+        self.insert("POST", url, 200, body.as_bytes(), Vec::new())
+    }
+
+    pub fn post_with_headers(self, url: &str, body: &str, headers: &[(&str, &str)]) -> Self {
+        self.insert(
+            "POST",
+            url,
+            200,
+            body.as_bytes(),
+            headers
+                .iter()
+                .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                .collect(),
+        )
     }
 
     pub fn status(self, method: &str, url: &str, status: u16, body: &str) -> Self {
-        self.insert(method, url, status, body.as_bytes())
+        self.insert(method, url, status, body.as_bytes(), Vec::new())
     }
 
-    fn insert(self, method: &str, url: &str, status: u16, body: &[u8]) -> Self {
+    fn insert(
+        self,
+        method: &str,
+        url: &str,
+        status: u16,
+        body: &[u8],
+        headers: Vec<(String, String)>,
+    ) -> Self {
         let key = route_key(method, url);
         self.routes
             .lock()
@@ -121,9 +170,25 @@ impl MockHttp {
                 HttpResponse {
                     status,
                     body: body.to_vec(),
+                    headers,
                 },
             );
         self
+    }
+
+    pub fn last(&self) -> Option<RecordedRequest> {
+        self.recorded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .last()
+            .cloned() // clone: caller inspects an owned copy of the last request
+    }
+
+    pub fn recorded(&self) -> Vec<RecordedRequest> {
+        self.recorded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone() // clone: tests inspect an owned copy of the request log
     }
 }
 
@@ -139,6 +204,20 @@ impl HttpClient for MockHttp {
             HttpMethod::Post => "POST",
         };
         let key = route_key(method, request.url.as_str());
+        self.recorded
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push(RecordedRequest {
+                method: method.to_string(),
+                url: request.url.as_str().to_string(),
+                headers: request
+                    .headers
+                    .iter()
+                    .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+                    .collect(),
+                body: request.json_body.cloned(), // clone: record owns the JSON body
+                form: request.form_body.map(str::to_string),
+            });
         self.routes
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -220,6 +299,7 @@ mod tests {
                 url: &url,
                 headers: &[],
                 json_body: None,
+                form_body: None,
             })
             .await
             .unwrap();

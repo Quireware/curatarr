@@ -352,6 +352,7 @@ impl EnrichmentService {
                 age_rating: None,
                 content_warnings: vec![],
                 read_status: curatarr_core::types::enums::ReadStatus::Unread,
+                monitored: false,
             })
             .await?;
         Ok(created.id)
@@ -629,6 +630,7 @@ mod tests {
                 age_rating: None,
                 content_warnings: vec![],
                 read_status: ReadStatus::Unread,
+                monitored: false,
             })
             .await
             .unwrap();

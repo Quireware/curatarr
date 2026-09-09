@@ -1,17 +1,20 @@
 use async_trait::async_trait;
 
 use crate::error::DbError;
+use crate::types::auth::{LoginAttempt, Session, User};
 use crate::types::author::{Author, AuthorFilter, AuthorUpdate, NewAuthor};
 use crate::types::collection::{Collection, CollectionUpdate, NewCollection};
 use crate::types::edition::{Edition, EditionFilter, EditionUpdate, NewEdition};
 use crate::types::file::{FileFilter, LibraryFile, LibraryFileUpdate, NewLibraryFile};
 use crate::types::id::{
-    AuthorId, CollectionId, EditionId, FileId, PublisherId, RecycleEntryId, RootFolderId,
-    SeriesEntryId, SeriesId, TagId, WorkId,
+    AuthorId, CollectionId, EditionId, FileId, PublisherId, QualityProfileId, QueueItemId,
+    RecycleEntryId, RootFolderId, SeriesEntryId, SeriesId, SessionId, TagId, UserId, WorkId,
 };
 use crate::types::identifiers::ExternalId;
 use crate::types::metadata::{AuditEvent, EntityKind, FieldLock, FieldSource, NewAuditEvent};
+use crate::types::profile::QualityProfile;
 use crate::types::publisher::{NewPublisher, Publisher, PublisherFilter, PublisherUpdate};
+use crate::types::queue::{NewQueueItem, QueueItem, QueueItemUpdate};
 use crate::types::recycle::{NewRecycleEntry, RecycleEntry};
 use crate::types::root_folder::{NewRootFolder, RootFolder};
 use crate::types::series::{
@@ -33,6 +36,33 @@ pub trait Repository: Send + Sync {
     ) -> Result<Page<Work>, DbError>;
     async fn update_work(&self, id: WorkId, update: &WorkUpdate) -> Result<Work, DbError>;
     async fn delete_work(&self, id: WorkId) -> Result<(), DbError>;
+    async fn list_wanted_work_ids(&self) -> Result<Vec<WorkId>, DbError>;
+    async fn list_quality_profiles(&self) -> Result<Vec<QualityProfile>, DbError>;
+    async fn get_quality_profile(
+        &self,
+        id: QualityProfileId,
+    ) -> Result<Option<QualityProfile>, DbError>;
+    async fn set_work_quality_profile(
+        &self,
+        work_id: WorkId,
+        profile_id: QualityProfileId,
+    ) -> Result<(), DbError>;
+
+    async fn create_queue_item(&self, item: &NewQueueItem) -> Result<QueueItem, DbError>;
+    async fn get_queue_item(&self, id: QueueItemId) -> Result<Option<QueueItem>, DbError>;
+    async fn list_queue(&self) -> Result<Vec<QueueItem>, DbError>;
+    async fn update_queue_item(
+        &self,
+        id: QueueItemId,
+        update: &QueueItemUpdate,
+    ) -> Result<QueueItem, DbError>;
+    async fn cas_queue_state(
+        &self,
+        id: QueueItemId,
+        expected_revision: i64,
+        update: &QueueItemUpdate,
+    ) -> Result<Option<QueueItem>, DbError>;
+    async fn active_queue_for_work(&self, work_id: WorkId) -> Result<Option<QueueItem>, DbError>;
 
     // Editions
     async fn create_edition(&self, edition: &NewEdition) -> Result<Edition, DbError>;
@@ -227,4 +257,31 @@ pub trait Repository: Send + Sync {
     async fn find_author_by_name(&self, name: &str) -> Result<Option<Author>, DbError>;
     async fn find_series_by_title(&self, title: &str) -> Result<Option<Series>, DbError>;
     async fn find_tag_by_name(&self, name: &str) -> Result<Option<Tag>, DbError>;
+
+    async fn user_count(&self) -> Result<u64, DbError>;
+    async fn create_user(&self, username: &str, password_hash: &str) -> Result<User, DbError>;
+    async fn get_user_by_username(&self, username: &str) -> Result<Option<User>, DbError>;
+    async fn get_user(&self, id: UserId) -> Result<Option<User>, DbError>;
+
+    async fn create_session(
+        &self,
+        user_id: UserId,
+        csrf_token: &str,
+        expires_at: chrono::DateTime<chrono::Utc>,
+    ) -> Result<Session, DbError>;
+    async fn get_session(&self, id: SessionId) -> Result<Option<Session>, DbError>;
+    async fn revoke_session(&self, id: SessionId) -> Result<(), DbError>;
+
+    async fn get_login_attempt(&self, key: &str) -> Result<Option<LoginAttempt>, DbError>;
+    async fn upsert_login_attempt(
+        &self,
+        key: &str,
+        failures: i64,
+        locked_until: Option<chrono::DateTime<chrono::Utc>>,
+    ) -> Result<(), DbError>;
+    async fn clear_login_attempt(&self, key: &str) -> Result<(), DbError>;
+
+    async fn get_setting(&self, key: &str) -> Result<Option<String>, DbError>;
+    async fn set_setting(&self, key: &str, value: &str) -> Result<(), DbError>;
+    async fn list_settings(&self) -> Result<Vec<(String, String)>, DbError>;
 }

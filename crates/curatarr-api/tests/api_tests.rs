@@ -1,6 +1,6 @@
 use axum::Router;
 use axum::body::Body;
-use axum::http::{Method, Request, StatusCode};
+use axum::http::{HeaderMap, Method, Request, StatusCode};
 use curatarr_api::router::build_router;
 use curatarr_api::state::AppState;
 use curatarr_config::library::LibraryConfig;
@@ -47,6 +47,10 @@ async fn call(app: &Router, method: Method, uri: &str, body: Option<Value>) -> (
         .method(method)
         .uri(uri)
         .header("content-type", "application/json")
+        .header(
+            "authorization",
+            format!("Bearer {}", curatarr_api::state::TEST_API_TOKEN),
+        )
         .body(match body {
             Some(v) => Body::from(v.to_string()),
             None => Body::empty(),
@@ -533,6 +537,7 @@ async fn seed_file(t: &TestApp, title: &str, path: &Path, sha256: &str) -> Strin
             age_rating: None,
             content_warnings: vec![],
             read_status: ReadStatus::Unread,
+            monitored: false,
         })
         .await
         .unwrap();
@@ -567,6 +572,142 @@ async fn seed_file(t: &TestApp, title: &str, path: &Path, sha256: &str) -> Strin
     .unwrap()
     .id
     .to_string()
+}
+
+async fn call_raw(
+    app: &Router,
+    method: Method,
+    uri: &str,
+    headers: Vec<(&str, &str)>,
+    body: Option<Value>,
+) -> (StatusCode, HeaderMap, Value) {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("content-type", "application/json");
+    for (k, v) in headers {
+        builder = builder.header(k, v);
+    }
+    let request = builder
+        .body(match body {
+            Some(v) => Body::from(v.to_string()),
+            None => Body::empty(),
+        })
+        .unwrap();
+    let response = app.clone().oneshot(request).await.unwrap();
+    let status = response.status();
+    let header_map = response.headers().clone();
+    let bytes = response.into_body().collect().await.unwrap().to_bytes();
+    let json = if bytes.is_empty() {
+        Value::Null
+    } else {
+        serde_json::from_slice(&bytes)
+            .unwrap_or(Value::String(String::from_utf8_lossy(&bytes).into_owned()))
+    };
+    (status, header_map, json)
+}
+
+#[tokio::test]
+async fn api_without_bearer_is_unauthorized() {
+    let t = test_app().await;
+    let request = Request::builder()
+        .method(Method::GET)
+        .uri("/api/v1/works")
+        .body(Body::empty())
+        .unwrap();
+    let response = t.app.clone().oneshot(request).await.unwrap();
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn login_cookie_reaches_wanted_and_login_is_public() {
+    let t = test_app().await;
+    t.db.create_user("admin", &curatarr_auth::hash_password("secret").unwrap())
+        .await
+        .unwrap();
+
+    let (status, _, _) = call_raw(&t.app, Method::GET, "/login", vec![], None).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let (status, headers, body) = call_raw(
+        &t.app,
+        Method::POST,
+        "/api/v1/login",
+        vec![],
+        Some(json!({"username":"admin","password":"secret"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let csrf = body["csrf_token"].as_str().unwrap().to_string();
+    let cookie = headers
+        .get("set-cookie")
+        .unwrap()
+        .to_str()
+        .unwrap()
+        .split(';')
+        .next()
+        .unwrap()
+        .to_string();
+
+    let (status, _, wanted) = call_raw(
+        &t.app,
+        Method::GET,
+        "/api/v1/wanted",
+        vec![("cookie", cookie.as_str())],
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(wanted.as_array().unwrap().is_empty());
+
+    let (status, created) = call(
+        &t.app,
+        Method::POST,
+        "/api/v1/works",
+        Some(work_body("Dune", "book")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["id"].as_str().unwrap();
+
+    let (status, _, _) = call_raw(
+        &t.app,
+        Method::POST,
+        &format!("/api/v1/works/{id}/monitor"),
+        vec![("cookie", cookie.as_str()), ("x-csrf-token", csrf.as_str())],
+        Some(json!({"monitored": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn login_lockout_survives_in_database() {
+    let t = test_app().await;
+    t.db.create_user("admin", &curatarr_auth::hash_password("secret").unwrap())
+        .await
+        .unwrap();
+    for _ in 0..10 {
+        let (status, _, _) = call_raw(
+            &t.app,
+            Method::POST,
+            "/api/v1/login",
+            vec![],
+            Some(json!({"username":"admin","password":"wrong"})),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNAUTHORIZED);
+    }
+    let (status, _, err) = call_raw(
+        &t.app,
+        Method::POST,
+        "/api/v1/login",
+        vec![],
+        Some(json!({"username":"admin","password":"secret"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert_eq!(err["error"]["code"], "LOCKED");
 }
 
 #[tokio::test]
@@ -776,4 +917,57 @@ async fn duplicates_exact_and_near() {
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn monitor_work_appears_in_wanted() {
+    let t = test_app().await;
+    let (status, created) = call(
+        &t.app,
+        Method::POST,
+        "/api/v1/works",
+        Some(work_body("Dune", "book")),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED);
+    let id = created["id"].as_str().unwrap();
+    assert_eq!(created["monitored"], false);
+
+    let (status, wanted) = call(&t.app, Method::GET, "/api/v1/wanted", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(wanted.as_array().unwrap().is_empty());
+
+    let (status, updated) = call(
+        &t.app,
+        Method::POST,
+        &format!("/api/v1/works/{id}/monitor"),
+        Some(json!({"monitored": true})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["monitored"], true);
+
+    let (status, wanted) = call(&t.app, Method::GET, "/api/v1/wanted", None).await;
+    assert_eq!(status, StatusCode::OK);
+    let ids: Vec<&str> = wanted
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|w| w["id"].as_str().unwrap())
+        .collect();
+    assert!(ids.contains(&id));
+
+    let (status, queue) = call(&t.app, Method::GET, "/api/v1/queue", None).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(queue.as_array().unwrap().is_empty());
+
+    let (status, err) = call(
+        &t.app,
+        Method::POST,
+        &format!("/api/v1/works/{id}/search"),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(err["error"]["code"], "BAD_REQUEST");
 }

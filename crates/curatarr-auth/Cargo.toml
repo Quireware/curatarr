@@ -1,0 +1,17 @@
+[package]
+name = "curatarr-auth"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+argon2 = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+
+[dev-dependencies]
+http-body-util = "0.1"
+rstest = { workspace = true }
+tokio = { workspace = true }
+tower = { version = "0.5", features = ["util"] }

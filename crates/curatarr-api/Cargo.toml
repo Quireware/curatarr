@@ -11,6 +11,9 @@ curatarr-db = { workspace = true }
 curatarr-config = { workspace = true }
 curatarr-scanner = { workspace = true }
 curatarr-metadata = { workspace = true }
+curatarr-auth = { workspace = true }
+curatarr-acquire = { workspace = true }
+curatarr-web = { workspace = true }
 axum = { workspace = true }
 tokio = { workspace = true }
 tower-http = { workspace = true }

@@ -16,7 +16,9 @@ use curatarr_core::types::identifiers::ExternalId;
 use curatarr_core::types::metadata::{
     AuditEvent, EntityKind, FieldLock, FieldSource, NewAuditEvent,
 };
+use curatarr_core::types::profile::QualityProfile;
 use curatarr_core::types::publisher::{NewPublisher, Publisher, PublisherFilter, PublisherUpdate};
+use curatarr_core::types::queue::{NewQueueItem, QueueItem, QueueItemUpdate};
 use curatarr_core::types::recycle::{NewRecycleEntry, RecycleEntry};
 use curatarr_core::types::root_folder::{NewRootFolder, RootFolder};
 use curatarr_core::types::series::{
@@ -50,7 +52,7 @@ pub(crate) fn parse_dt(s: &str) -> DateTime<Utc> {
         .unwrap_or_default()
 }
 
-fn parse_opt_dt(s: Option<&str>) -> Option<DateTime<Utc>> {
+pub(crate) fn parse_opt_dt(s: Option<&str>) -> Option<DateTime<Utc>> {
     s.map(parse_dt)
 }
 
@@ -58,7 +60,7 @@ fn parse_date(s: Option<&str>) -> Option<NaiveDate> {
     s.and_then(|v| NaiveDate::parse_from_str(v, "%Y-%m-%d").ok())
 }
 
-fn parse_uuid(s: &str) -> Uuid {
+pub(crate) fn parse_uuid(s: &str) -> Uuid {
     Uuid::parse_str(s).unwrap_or_default()
 }
 
@@ -173,6 +175,7 @@ fn work_from_row(row: &sqlx::sqlite::SqliteRow) -> Work {
         user_review: row.get("user_review"),
         read_status: de_enum(row.get("read_status")),
         user_notes: row.get("user_notes"),
+        monitored: row.get::<i64, _>("monitored") != 0,
         created_at: parse_dt(row.get("created_at")),
         updated_at: parse_dt(row.get("updated_at")),
     }
@@ -240,6 +243,7 @@ fn series_from_row(row: &sqlx::sqlite::SqliteRow) -> Series {
             .get::<Option<i32>, _>("expected_volume_count")
             .map(|v| v as u32),
         external_ids: vec![],
+        monitored: row.get::<i64, _>("monitored") != 0,
         created_at: parse_dt(row.get("created_at")),
         updated_at: parse_dt(row.get("updated_at")),
     }
@@ -320,8 +324,8 @@ impl Repository for SqliteRepository {
         sqlx::query(
             "INSERT INTO works (id, title, sort_title, original_language, original_pub_date,
              description, description_html, content_type, age_rating, content_warnings,
-             read_status, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             read_status, monitored, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id.to_string())
         .bind(&work.title)
@@ -334,6 +338,7 @@ impl Repository for SqliteRepository {
         .bind(work.age_rating.map(|r| ser_enum(&r)))
         .bind(&warnings)
         .bind(ser_enum(&work.read_status))
+        .bind(i64::from(work.monitored))
         .bind(&now)
         .bind(&now)
         .execute(&self.pool)
@@ -456,6 +461,7 @@ impl Repository for SqliteRepository {
             update.read_status.map(|v| ser_enum(&v)).as_ref(),
         );
         u.set_nullable("user_notes", update.user_notes.as_ref());
+        u.set("monitored", update.monitored.map(i64::from).as_ref());
         u.execute(&self.pool, "works", &id.to_string()).await?;
 
         self.get_work(id).await?.ok_or(DbError::NotFound {
@@ -769,8 +775,8 @@ impl Repository for SqliteRepository {
 
         sqlx::query(
             "INSERT INTO series (id, title, sort_title, description, series_type, reading_order,
-             volume_count, expected_volume_count, created_at, updated_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             volume_count, expected_volume_count, monitored, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(id.to_string())
         .bind(&series.title)
@@ -780,6 +786,7 @@ impl Repository for SqliteRepository {
         .bind(ser_enum(&series.reading_order))
         .bind(series.volume_count.map(|n| n as i32))
         .bind(series.expected_volume_count.map(|n| n as i32))
+        .bind(i64::from(series.monitored))
         .bind(&now)
         .bind(&now)
         .execute(&self.pool)
@@ -871,7 +878,20 @@ impl Repository for SqliteRepository {
             "expected_volume_count",
             update.expected_volume_count.as_ref(),
         );
+        u.set("monitored", update.monitored.map(i64::from).as_ref());
         u.execute(&self.pool, "series", &id.to_string()).await?;
+
+        if let Some(monitored) = update.monitored {
+            sqlx::query(
+                "UPDATE works SET monitored = ?
+                 WHERE id IN (SELECT work_id FROM series_entries WHERE series_id = ?)",
+            )
+            .bind(i64::from(monitored))
+            .bind(id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        }
 
         self.get_series(id).await?.ok_or(DbError::NotFound {
             entity: "series",
@@ -1617,10 +1637,315 @@ impl Repository for SqliteRepository {
         };
         self.get_tag(TagId::from_uuid(parse_uuid(&id))).await
     }
+
+    async fn list_wanted_work_ids(&self) -> Result<Vec<WorkId>, DbError> {
+        let rows = sqlx::query(
+            "SELECT w.id FROM works w
+             WHERE w.monitored = 1
+               AND NOT EXISTS (
+                   SELECT 1 FROM files f
+                   JOIN editions e ON e.id = f.edition_id
+                   WHERE e.work_id = w.id AND f.deleted_at IS NULL
+               )",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| DbError::Internal(Box::new(e)))?;
+        Ok(rows
+            .iter()
+            .map(|row| WorkId::from_uuid(parse_uuid(row.get("id"))))
+            .collect())
+    }
+
+    async fn list_quality_profiles(&self) -> Result<Vec<QualityProfile>, DbError> {
+        let rows = sqlx::query("SELECT * FROM quality_profiles ORDER BY name")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        Ok(rows.iter().map(profile_from_row).collect())
+    }
+
+    async fn get_quality_profile(
+        &self,
+        id: QualityProfileId,
+    ) -> Result<Option<QualityProfile>, DbError> {
+        let row = sqlx::query("SELECT * FROM quality_profiles WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        Ok(row.as_ref().map(profile_from_row))
+    }
+
+    async fn set_work_quality_profile(
+        &self,
+        work_id: WorkId,
+        profile_id: QualityProfileId,
+    ) -> Result<(), DbError> {
+        let result = sqlx::query("UPDATE works SET quality_profile_id = ? WHERE id = ?")
+            .bind(profile_id.to_string())
+            .bind(work_id.to_string())
+            .execute(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        if result.rows_affected() == 0 {
+            return Err(DbError::NotFound {
+                entity: "work",
+                id: work_id.to_string(),
+            });
+        }
+        Ok(())
+    }
+
+    async fn create_queue_item(&self, item: &NewQueueItem) -> Result<QueueItem, DbError> {
+        let id = QueueItemId::new();
+        let key = if item.idempotency_key.is_empty() {
+            id.to_string()
+        } else {
+            item.idempotency_key.clone() // clone: row stores its own copy of the key
+        };
+        let now = now_iso();
+        sqlx::query(
+            "INSERT INTO download_queue
+             (id, work_id, state, protocol, indexer, title, guid, download_url, client,
+              idempotency_key, revision, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)",
+        )
+        .bind(id.to_string())
+        .bind(item.work_id.to_string())
+        .bind(ser_enum(&item.state))
+        .bind(item.protocol.map(|p| ser_enum(&p)))
+        .bind(&item.indexer)
+        .bind(&item.title)
+        .bind(&item.guid)
+        .bind(&item.download_url)
+        .bind(&item.client)
+        .bind(&key)
+        .bind(&now)
+        .execute(&self.pool)
+        .await
+        .map_err(map_unique_violation)?;
+        self.get_queue_item(id).await?.ok_or(DbError::NotFound {
+            entity: "queue",
+            id: id.to_string(),
+        })
+    }
+
+    async fn get_queue_item(&self, id: QueueItemId) -> Result<Option<QueueItem>, DbError> {
+        let row = sqlx::query("SELECT * FROM download_queue WHERE id = ?")
+            .bind(id.to_string())
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        Ok(row.as_ref().map(queue_from_row))
+    }
+
+    async fn list_queue(&self) -> Result<Vec<QueueItem>, DbError> {
+        let rows = sqlx::query("SELECT * FROM download_queue ORDER BY updated_at DESC")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| DbError::Internal(Box::new(e)))?;
+        Ok(rows.iter().map(queue_from_row).collect())
+    }
+
+    async fn update_queue_item(
+        &self,
+        id: QueueItemId,
+        update: &QueueItemUpdate,
+    ) -> Result<QueueItem, DbError> {
+        apply_queue_update(&self.pool, id, None, update)
+            .await?
+            .ok_or(DbError::NotFound {
+                entity: "queue",
+                id: id.to_string(),
+            })
+    }
+
+    async fn cas_queue_state(
+        &self,
+        id: QueueItemId,
+        expected_revision: i64,
+        update: &QueueItemUpdate,
+    ) -> Result<Option<QueueItem>, DbError> {
+        apply_queue_update(&self.pool, id, Some(expected_revision), update).await
+    }
+
+    async fn active_queue_for_work(&self, work_id: WorkId) -> Result<Option<QueueItem>, DbError> {
+        let row = sqlx::query(
+            "SELECT * FROM download_queue
+             WHERE work_id = ?
+               AND state NOT IN ('imported', 'failed', 'conflict')
+             LIMIT 1",
+        )
+        .bind(work_id.to_string())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| DbError::Internal(Box::new(e)))?;
+        Ok(row.as_ref().map(queue_from_row))
+    }
+
+    async fn user_count(&self) -> Result<u64, DbError> {
+        crate::auth_repo::user_count(&self.pool).await
+    }
+    async fn create_user(
+        &self,
+        username: &str,
+        password_hash: &str,
+    ) -> Result<curatarr_core::types::auth::User, DbError> {
+        crate::auth_repo::create_user(&self.pool, username, password_hash).await
+    }
+    async fn get_user_by_username(
+        &self,
+        username: &str,
+    ) -> Result<Option<curatarr_core::types::auth::User>, DbError> {
+        crate::auth_repo::get_user_by_username(&self.pool, username).await
+    }
+    async fn get_user(
+        &self,
+        id: UserId,
+    ) -> Result<Option<curatarr_core::types::auth::User>, DbError> {
+        crate::auth_repo::get_user(&self.pool, id).await
+    }
+    async fn create_session(
+        &self,
+        user_id: UserId,
+        csrf_token: &str,
+        expires_at: DateTime<Utc>,
+    ) -> Result<curatarr_core::types::auth::Session, DbError> {
+        crate::auth_repo::create_session(&self.pool, user_id, csrf_token, expires_at).await
+    }
+    async fn get_session(
+        &self,
+        id: SessionId,
+    ) -> Result<Option<curatarr_core::types::auth::Session>, DbError> {
+        crate::auth_repo::get_session(&self.pool, id).await
+    }
+    async fn revoke_session(&self, id: SessionId) -> Result<(), DbError> {
+        crate::auth_repo::revoke_session(&self.pool, id).await
+    }
+    async fn get_login_attempt(
+        &self,
+        key: &str,
+    ) -> Result<Option<curatarr_core::types::auth::LoginAttempt>, DbError> {
+        crate::auth_repo::get_login_attempt(&self.pool, key).await
+    }
+    async fn upsert_login_attempt(
+        &self,
+        key: &str,
+        failures: i64,
+        locked_until: Option<DateTime<Utc>>,
+    ) -> Result<(), DbError> {
+        crate::auth_repo::upsert_login_attempt(&self.pool, key, failures, locked_until).await
+    }
+    async fn clear_login_attempt(&self, key: &str) -> Result<(), DbError> {
+        crate::auth_repo::clear_login_attempt(&self.pool, key).await
+    }
+    async fn get_setting(&self, key: &str) -> Result<Option<String>, DbError> {
+        crate::auth_repo::get_setting(&self.pool, key).await
+    }
+    async fn set_setting(&self, key: &str, value: &str) -> Result<(), DbError> {
+        crate::auth_repo::set_setting(&self.pool, key, value).await
+    }
+    async fn list_settings(&self) -> Result<Vec<(String, String)>, DbError> {
+        crate::auth_repo::list_settings(&self.pool).await
+    }
+}
+
+fn queue_from_row(row: &sqlx::sqlite::SqliteRow) -> QueueItem {
+    QueueItem {
+        id: QueueItemId::from_uuid(parse_uuid(row.get("id"))),
+        work_id: WorkId::from_uuid(parse_uuid(row.get("work_id"))),
+        state: de_enum(row.get("state")),
+        protocol: row
+            .get::<Option<String>, _>("protocol")
+            .as_deref()
+            .map(de_enum),
+        indexer: row.get("indexer"),
+        title: row.get("title"),
+        guid: row.get("guid"),
+        download_url: row.get("download_url"),
+        client: row.get("client"),
+        client_ref: row.get("client_ref"),
+        output_path: row.get("output_path"),
+        error: row.get("error"),
+        idempotency_key: row.get("idempotency_key"),
+        revision: row.get("revision"),
+        grabbed_at: parse_opt_dt(row.get("grabbed_at")),
+        updated_at: parse_dt(row.get("updated_at")),
+    }
+}
+
+async fn apply_queue_update(
+    pool: &SqlitePool,
+    id: QueueItemId,
+    expected_revision: Option<i64>,
+    update: &QueueItemUpdate,
+) -> Result<Option<QueueItem>, DbError> {
+    let now = now_iso();
+    let mut sql = String::from("UPDATE download_queue SET updated_at = ?, revision = revision + 1");
+    if update.state.is_some() {
+        sql.push_str(", state = ?");
+    }
+    if update.client_ref.is_some() {
+        sql.push_str(", client_ref = ?");
+    }
+    if update.output_path.is_some() {
+        sql.push_str(", output_path = ?");
+    }
+    if update.error.is_some() {
+        sql.push_str(", error = ?");
+    }
+    sql.push_str(" WHERE id = ?");
+    if expected_revision.is_some() {
+        sql.push_str(" AND revision = ?");
+    }
+    let mut q = sqlx::query(&sql).bind(&now);
+    if let Some(state) = update.state {
+        q = q.bind(ser_enum(&state));
+    }
+    if let Some(r) = &update.client_ref {
+        q = q.bind(r);
+    }
+    if let Some(p) = &update.output_path {
+        q = q.bind(p);
+    }
+    if let Some(e) = &update.error {
+        q = q.bind(e);
+    }
+    q = q.bind(id.to_string());
+    if let Some(rev) = expected_revision {
+        q = q.bind(rev);
+    }
+    let result = q
+        .execute(pool)
+        .await
+        .map_err(|e| DbError::Internal(Box::new(e)))?;
+    if result.rows_affected() == 0 {
+        return Ok(None);
+    }
+    let row = sqlx::query("SELECT * FROM download_queue WHERE id = ?")
+        .bind(id.to_string())
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| DbError::Internal(Box::new(e)))?;
+    Ok(row.as_ref().map(queue_from_row))
+}
+
+fn profile_from_row(row: &sqlx::sqlite::SqliteRow) -> QualityProfile {
+    let order_json: String = row.get("format_order");
+    let format_order = serde_json::from_str(&order_json).unwrap_or_default();
+    QualityProfile {
+        id: QualityProfileId::from_uuid(parse_uuid(row.get("id"))),
+        name: row.get("name"),
+        format_order,
+        max_size_bytes: row
+            .get::<Option<i64>, _>("max_size_bytes")
+            .and_then(|n| u64::try_from(n).ok()),
+    }
 }
 
 /// Map a SQLite UNIQUE violation to `DbError::Conflict`, everything else to `Internal`.
-fn map_unique_violation(e: sqlx::Error) -> DbError {
+pub(crate) fn map_unique_violation(e: sqlx::Error) -> DbError {
     match &e {
         sqlx::Error::Database(db_err) if db_err.is_unique_violation() => {
             DbError::Conflict(db_err.message().to_string())

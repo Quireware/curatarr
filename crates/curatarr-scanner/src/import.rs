@@ -70,6 +70,14 @@ pub enum ImportOutcome {
     },
 }
 
+/// Result of attaching a file to a specific work (acquisition import).
+#[derive(Debug, Clone, PartialEq)]
+pub enum TargetedImport {
+    Imported(Box<ImportResult>),
+    SameWorkDuplicate(LibraryFile),
+    OtherWorkDuplicate(LibraryFile),
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ImportFailure {
     pub path: PathBuf,
@@ -149,6 +157,65 @@ pub async fn import_directory_with_progress(
     Ok(report)
 }
 
+pub async fn import_file_for_work(
+    path: &Path,
+    work_id: WorkId,
+    config: &ImportConfig,
+    db: &dyn Repository,
+) -> Result<TargetedImport, ScannerError> {
+    let format = detect_format(path)?;
+    let sha256 = hash_file(path).await?;
+    if let Some(existing) = db.find_file_by_hash(&sha256).await? {
+        let edition = db
+            .get_edition(existing.edition_id)
+            .await?
+            .ok_or(ScannerError::Database(
+                curatarr_core::error::DbError::NotFound {
+                    entity: "edition",
+                    id: existing.edition_id.to_string(),
+                },
+            ))?;
+        if edition.work_id == work_id {
+            return Ok(TargetedImport::SameWorkDuplicate(existing));
+        }
+        return Ok(TargetedImport::OtherWorkDuplicate(existing));
+    }
+
+    let meta = extract_metadata(path, format);
+    let title = meta.title_or_stem(path);
+    let dest = if config.organise {
+        plan_destination(config, &meta, &title, format, path)?
+    } else {
+        path.to_path_buf()
+    };
+    let transferred = dest != path;
+    if transferred {
+        transfer(path, &dest, config.mode).await?;
+    }
+    let size_bytes = tokio::fs::metadata(&dest)
+        .await
+        .map_err(|e| io_err(&dest, e))?
+        .len();
+    let input = PersistInput {
+        meta: &meta,
+        title,
+        format,
+        dest: &dest,
+        size_bytes,
+        sha256,
+        target_work: Some(work_id),
+    };
+    match persist(db, config, input).await {
+        Ok(result) => Ok(TargetedImport::Imported(Box::new(result))),
+        Err(e) => {
+            if transferred {
+                undo_transfer(path, &dest, config.mode).await;
+            }
+            Err(e)
+        }
+    }
+}
+
 pub async fn import_file(
     path: &Path,
     config: &ImportConfig,
@@ -190,6 +257,7 @@ pub async fn import_file(
         dest: &dest,
         size_bytes,
         sha256,
+        target_work: None,
     };
     match persist(db, config, input).await {
         Ok(result) => Ok(ImportOutcome::Imported(Box::new(result))),
@@ -333,6 +401,7 @@ struct PersistInput<'a> {
     dest: &'a Path,
     size_bytes: u64,
     sha256: String,
+    target_work: Option<WorkId>,
 }
 
 async fn persist(
@@ -363,12 +432,23 @@ async fn persist_inner(
         dest,
         size_bytes,
         sha256,
+        target_work,
     } = input;
     let content_type = meta
         .content_type
         .unwrap_or_else(|| default_content_type(format));
 
-    let (work, is_new_work) = find_or_create_work(db, &title, &meta.authors, content_type).await?;
+    let (work, is_new_work) = if let Some(id) = target_work {
+        let work = db.get_work(id).await?.ok_or(ScannerError::Database(
+            curatarr_core::error::DbError::NotFound {
+                entity: "work",
+                id: id.to_string(),
+            },
+        ))?;
+        (work, false)
+    } else {
+        find_or_create_work(db, &title, &meta.authors, content_type).await?
+    };
     if is_new_work {
         created.work = Some(work.id);
     }
@@ -516,6 +596,7 @@ async fn find_or_create_work(
             age_rating: None,
             content_warnings: vec![],
             read_status: ReadStatus::Unread,
+            monitored: false,
         })
         .await?;
     Ok((work, true))
@@ -678,6 +759,7 @@ async fn attach_series(
                 volume_count: None,
                 expected_volume_count: None,
                 external_ids: vec![],
+                monitored: false,
             })
             .await?
         }

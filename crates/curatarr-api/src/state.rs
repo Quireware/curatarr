@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use curatarr_acquire::AcquireService;
 use curatarr_config::library::LibraryConfig;
 use curatarr_core::traits::repository::Repository;
 use curatarr_core::types::id::RootFolderId;
@@ -6,8 +7,10 @@ use curatarr_metadata::EnrichmentService;
 use curatarr_scanner::import::{ImportConfig, ImportEvent};
 use serde::Serialize;
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+pub const TEST_API_TOKEN: &str = "test-token";
 
 #[derive(Clone)]
 pub struct AppState {
@@ -15,6 +18,9 @@ pub struct AppState {
     pub library: Arc<LibraryConfig>,
     pub scans: ScanRegistry,
     pub metadata: Arc<EnrichmentService>,
+    pub api_token: Arc<Mutex<Arc<str>>>,
+    pub token_file: Option<PathBuf>,
+    pub acquire: Option<Arc<AcquireService>>,
 }
 
 impl AppState {
@@ -25,7 +31,32 @@ impl AppState {
             library: Arc::new(library),
             scans: ScanRegistry::default(),
             metadata,
+            api_token: Arc::new(Mutex::new(Arc::from(TEST_API_TOKEN))),
+            token_file: None,
+            acquire: None,
         }
+    }
+
+    pub fn current_token(&self) -> Arc<str> {
+        self.api_token
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone() // clone: middleware and handlers hold a snapshot
+    }
+
+    pub fn with_acquire(mut self, acquire: Arc<AcquireService>) -> Self {
+        self.acquire = Some(acquire);
+        self
+    }
+
+    pub fn with_api_token(self, token: impl Into<String>) -> Self {
+        *self.api_token.lock().unwrap_or_else(|e| e.into_inner()) = Arc::from(token.into());
+        self
+    }
+
+    pub fn with_token_file(mut self, path: PathBuf) -> Self {
+        self.token_file = Some(path);
+        self
     }
 
     pub fn with_metadata(mut self, metadata: EnrichmentService) -> Self {

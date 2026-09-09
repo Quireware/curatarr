@@ -16,8 +16,14 @@ curatarr-db = { workspace = true }
 curatarr-core = { workspace = true }
 curatarr-scanner = { workspace = true }
 curatarr-metadata = { workspace = true }
+curatarr-auth = { workspace = true }
+curatarr-indexer = { workspace = true }
+curatarr-downloader = { workspace = true }
+curatarr-acquire = { workspace = true }
+curatarr-notify = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+url = { workspace = true }

@@ -176,6 +176,7 @@ async fn sync_series(
                 volume_count: None,
                 expected_volume_count: None,
                 external_ids: vec![],
+                monitored: false,
             })
             .await?
         }
@@ -261,6 +262,7 @@ async fn fetch_cover(
             url,
             headers: &[],
             json_body: None,
+            form_body: None,
         })
         .await?;
     check_status("cover", &response, url.as_str())?;

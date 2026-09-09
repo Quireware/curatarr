@@ -24,6 +24,7 @@ fn new_work(title: &str, content_type: ContentType) -> NewWork {
         age_rating: None,
         content_warnings: vec![],
         read_status: ReadStatus::Unread,
+        monitored: false,
     }
 }
 
@@ -593,4 +594,193 @@ async fn metadata_locks_sources_audit_and_lookups() {
         .unwrap()
         .unwrap();
     assert_eq!(found.name, "Frank Herbert");
+}
+
+#[tokio::test]
+async fn wanted_is_monitored_works_without_files() {
+    let repo = test_repo().await;
+    let mut wanted = new_work("Wanted Book", ContentType::Book);
+    wanted.monitored = true;
+    let wanted_work = repo.create_work(&wanted).await.unwrap();
+    let ignored = repo
+        .create_work(&new_work("Ignored", ContentType::Book))
+        .await
+        .unwrap();
+
+    let ids = repo.list_wanted_work_ids().await.unwrap();
+    assert!(ids.contains(&wanted_work.id));
+    assert!(!ids.contains(&ignored.id));
+
+    let edition = repo
+        .create_edition(&NewEdition {
+            work_id: wanted_work.id,
+            isbn13: None,
+            isbn10: None,
+            asin: None,
+            publisher_id: None,
+            imprint: None,
+            publication_date: None,
+            edition_number: None,
+            format: FileFormat::Epub,
+            page_count: None,
+            word_count: None,
+            language: None,
+            translator: None,
+        })
+        .await
+        .unwrap();
+    repo.create_file(&NewLibraryFile {
+        edition_id: edition.id,
+        path: "/books/wanted.epub".into(),
+        format: FileFormat::Epub,
+        size_bytes: 1,
+        sha256: "wanted-hash".into(),
+    })
+    .await
+    .unwrap();
+
+    let ids = repo.list_wanted_work_ids().await.unwrap();
+    assert!(!ids.contains(&wanted_work.id));
+}
+
+#[tokio::test]
+async fn default_quality_profile_roundtrip() {
+    use curatarr_core::types::id::QualityProfileId;
+    use curatarr_core::types::profile::DEFAULT_QUALITY_PROFILE_ID;
+
+    let repo = test_repo().await;
+    let profiles = repo.list_quality_profiles().await.unwrap();
+    assert_eq!(profiles.len(), 1);
+    assert_eq!(profiles[0].name, "Default");
+    assert!(profiles[0].format_order.contains(&FileFormat::Epub));
+
+    let id: QualityProfileId = DEFAULT_QUALITY_PROFILE_ID.parse().unwrap();
+    let fetched = repo.get_quality_profile(id).await.unwrap().unwrap();
+    assert_eq!(fetched.format_order, profiles[0].format_order);
+
+    let work = repo
+        .create_work(&new_work("Dune", ContentType::Book))
+        .await
+        .unwrap();
+    repo.set_work_quality_profile(work.id, id).await.unwrap();
+}
+
+#[tokio::test]
+async fn queue_item_cas_and_active_lookup() {
+    use curatarr_core::types::queue::{NewQueueItem, QueueItemUpdate};
+
+    let repo = test_repo().await;
+    let work = repo
+        .create_work(&new_work("Dune", ContentType::Book))
+        .await
+        .unwrap();
+    let item = repo
+        .create_queue_item(&NewQueueItem {
+            work_id: work.id,
+            state: DownloadState::Submitting,
+            protocol: None,
+            indexer: Some("prowlarr".into()),
+            title: "Dune EPUB".into(),
+            guid: Some("g1".into()),
+            download_url: Some("http://x/d.nzb".into()),
+            client: Some("nzbget".into()),
+            idempotency_key: work.id.to_string(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(item.revision, 0);
+    assert!(repo.active_queue_for_work(work.id).await.unwrap().is_some());
+
+    let updated = repo
+        .cas_queue_state(
+            item.id,
+            0,
+            &QueueItemUpdate {
+                state: Some(DownloadState::Grabbed),
+                client_ref: Some("42".into()),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated.state, DownloadState::Grabbed);
+    assert_eq!(updated.revision, 1);
+
+    let stale = repo
+        .cas_queue_state(
+            item.id,
+            0,
+            &QueueItemUpdate {
+                state: Some(DownloadState::Failed),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert!(stale.is_none());
+}
+
+#[tokio::test]
+async fn user_session_and_login_attempts_roundtrip() {
+    let repo = test_repo().await;
+    assert_eq!(repo.user_count().await.unwrap(), 0);
+    let user = repo.create_user("admin", "hash").await.unwrap();
+    assert_eq!(repo.user_count().await.unwrap(), 1);
+    assert_eq!(
+        repo.get_user_by_username("admin")
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        user.id
+    );
+    let session = repo
+        .create_session(
+            user.id,
+            "csrf",
+            chrono::Utc::now() + chrono::Duration::hours(1),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.get_session(session.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .csrf_token,
+        "csrf"
+    );
+    repo.revoke_session(session.id).await.unwrap();
+    assert!(
+        repo.get_session(session.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .revoked_at
+            .is_some()
+    );
+    repo.upsert_login_attempt("admin", 10, Some(chrono::Utc::now()))
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.get_login_attempt("admin")
+            .await
+            .unwrap()
+            .unwrap()
+            .failures,
+        10
+    );
+    repo.clear_login_attempt("admin").await.unwrap();
+    assert!(repo.get_login_attempt("admin").await.unwrap().is_none());
+    repo.set_setting("search_interval_minutes", "15")
+        .await
+        .unwrap();
+    assert_eq!(
+        repo.get_setting("search_interval_minutes")
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("15")
+    );
 }

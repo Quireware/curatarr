@@ -170,6 +170,7 @@ mod tests {
                 age_rating: None,
                 content_warnings: vec![],
                 read_status: ReadStatus::Unread,
+                monitored: false,
             })
             .await
             .unwrap();

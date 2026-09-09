@@ -55,3 +55,31 @@ refresh_interval_hours = 0
 # priority = 10
 # api_key = "YOUR_KEY"
 # rate_limit_per_minute = 200
+
+[auth]
+# Prefer CURATARR__AUTH__API_TOKEN or api_token_file so the token is not
+# written into a Nix store TOML. serve refuses to start if the token is empty.
+# api_token = ""
+# api_token_file = "/run/credentials/curatarr.service/api_token"
+# First-run admin (not stored in Nix-generated TOML):
+# admin_credentials_file = "/run/credentials/curatarr.service/admin"
+
+[acquire]
+search_interval_minutes = 15
+poll_interval_seconds = 10
+# Acquisition starts when both URLs are set.
+# prowlarr_url = "http://127.0.0.1:9696"
+# prowlarr_api_key = ""
+# nzbget_url = "http://127.0.0.1:6789/jsonrpc"
+# nzbget_username = "nzbget"
+# nzbget_password = ""
+# nzbget_dest_dir = "/mnt/external/media/downloads/usenet/complete"
+# ntfy_url = "https://ntfy.sh"
+# ntfy_topic = ""
+
+# Optional. Torrent releases are skipped unless this table is set.
+# [download_clients.qbittorrent]
+# url = "http://127.0.0.1:8080"
+# username = "admin"
+# password = ""
+# save_path = ""

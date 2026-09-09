@@ -59,6 +59,7 @@ image = "0.25"
 
 # Hashing
 sha2 = "0.10"
+argon2 = { version = "0.5", features = ["std"] }
 
 # Filesystem
 walkdir = "2"
@@ -79,4 +80,11 @@ curatarr-config = { path = "crates/curatarr-config" }
 curatarr-db = { path = "crates/curatarr-db" }
 curatarr-scanner = { path = "crates/curatarr-scanner" }
 curatarr-metadata = { path = "crates/curatarr-metadata" }
+curatarr-auth = { path = "crates/curatarr-auth" }
+curatarr-indexer = { path = "crates/curatarr-indexer" }
+curatarr-downloader = { path = "crates/curatarr-downloader" }
+curatarr-acquire = { path = "crates/curatarr-acquire" }
+curatarr-notify = { path = "crates/curatarr-notify" }
+base64 = "0.22"
 curatarr-api = { path = "crates/curatarr-api" }
+curatarr-web = { path = "crates/curatarr-web" }

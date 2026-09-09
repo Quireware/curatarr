@@ -47,6 +47,7 @@ impl LibraryThing {
                 url: &url,
                 headers: &[],
                 json_body: None,
+                form_body: None,
             })
             .await?;
         check_status(NAME, &response, isbn)?;

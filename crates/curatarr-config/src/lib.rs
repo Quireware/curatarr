@@ -1,4 +1,7 @@
+pub mod acquire;
+pub mod auth;
 pub mod database;
+pub mod download_clients;
 pub mod library;
 pub mod logging;
 pub mod metadata;
@@ -8,7 +11,10 @@ use curatarr_core::error::ConfigError;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
+use acquire::AcquireConfig;
+use auth::AuthConfig;
 use database::DatabaseConfig;
+use download_clients::DownloadClientsConfig;
 use library::LibraryConfig;
 use logging::LogConfig;
 use metadata::MetadataConfig;
@@ -26,6 +32,12 @@ pub struct AppConfig {
     pub log: LogConfig,
     #[serde(default)]
     pub metadata: MetadataConfig,
+    #[serde(default)]
+    pub auth: AuthConfig,
+    #[serde(default)]
+    pub acquire: AcquireConfig,
+    #[serde(default)]
+    pub download_clients: DownloadClientsConfig,
 }
 
 impl AppConfig {
@@ -197,6 +209,43 @@ port = 3000
             let back: DatabaseConfig = toml::from_str(&toml_str).unwrap();
             prop_assert_eq!(config, back);
         }
+    }
+
+    #[test]
+    fn auth_and_acquire_from_toml() {
+        let file = write_toml(
+            r#"
+[auth]
+api_token = "tok"
+
+[acquire]
+prowlarr_url = "http://prowlarr:9696"
+nzbget_url = "http://nzbget:6789/jsonrpc"
+search_interval_minutes = 5
+poll_interval_seconds = 3
+"#,
+        );
+        let config = AppConfig::load(Some(file.path())).unwrap();
+        assert_eq!(config.auth.api_token, "tok");
+        assert_eq!(config.acquire.search_interval_minutes, 5);
+        assert_eq!(config.acquire.poll_interval_seconds, 3);
+        assert!(config.acquire.enabled());
+    }
+
+    #[test]
+    fn qbittorrent_from_toml() {
+        let file = write_toml(
+            r#"
+[download_clients.qbittorrent]
+url = "http://127.0.0.1:8080"
+username = "admin"
+password = "secret"
+"#,
+        );
+        let config = AppConfig::load(Some(file.path())).unwrap();
+        let qbit = config.download_clients.qbittorrent.unwrap();
+        assert!(qbit.enabled());
+        assert_eq!(qbit.username, "admin");
     }
 
     #[test]

@@ -1,3 +1,4 @@
+mod auth_repo;
 mod metadata_repo;
 mod sqlite;
 
@@ -19,6 +20,14 @@ const MIGRATIONS: &[(&str, &str)] = &[
     (
         "002_metadata",
         include_str!("../../../migrations/sqlite/002_metadata.sql"),
+    ),
+    (
+        "003_acquisition",
+        include_str!("../../../migrations/sqlite/003_acquisition.sql"),
+    ),
+    (
+        "004_users",
+        include_str!("../../../migrations/sqlite/004_users.sql"),
     ),
 ];
 

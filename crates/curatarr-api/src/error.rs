@@ -55,6 +55,30 @@ impl ApiError {
             message: message.into(),
         }
     }
+
+    pub fn unauthorized() -> Self {
+        Self {
+            status: StatusCode::UNAUTHORIZED,
+            code: "UNAUTHORIZED",
+            message: "authentication required".into(),
+        }
+    }
+
+    pub fn forbidden(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "FORBIDDEN",
+            message: message.into(),
+        }
+    }
+
+    pub fn locked(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::FORBIDDEN,
+            code: "LOCKED",
+            message: message.into(),
+        }
+    }
 }
 
 impl From<ProviderError> for ApiError {

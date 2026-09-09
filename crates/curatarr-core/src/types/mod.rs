@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod author;
 pub mod collection;
 pub mod edition;
@@ -6,8 +7,11 @@ pub mod file;
 pub mod id;
 pub mod identifiers;
 pub mod metadata;
+pub mod profile;
 pub mod publisher;
+pub mod queue;
 pub mod recycle;
+pub mod release;
 pub mod root_folder;
 pub mod serde_helpers;
 pub mod series;
@@ -102,6 +106,7 @@ mod tests {
             user_review: None,
             read_status: ReadStatus::WantToRead,
             user_notes: None,
+            monitored: false,
             created_at: now,
             updated_at: now,
         };
@@ -185,6 +190,7 @@ mod tests {
             volume_count: Some(6),
             expected_volume_count: Some(6),
             external_ids: vec![],
+            monitored: false,
             created_at: now,
             updated_at: now,
         };

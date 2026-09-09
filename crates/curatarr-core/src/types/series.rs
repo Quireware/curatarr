@@ -16,6 +16,7 @@ pub struct Series {
     pub volume_count: Option<u32>,
     pub expected_volume_count: Option<u32>,
     pub external_ids: Vec<ExternalId>,
+    pub monitored: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -30,6 +31,8 @@ pub struct NewSeries {
     pub volume_count: Option<u32>,
     pub expected_volume_count: Option<u32>,
     pub external_ids: Vec<ExternalId>,
+    #[serde(default)]
+    pub monitored: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -45,6 +48,7 @@ pub struct SeriesUpdate {
     #[serde(default, deserialize_with = "super::serde_helpers::double_option")]
     pub expected_volume_count: Option<Option<u32>>,
     pub external_ids: Option<Vec<ExternalId>>,
+    pub monitored: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

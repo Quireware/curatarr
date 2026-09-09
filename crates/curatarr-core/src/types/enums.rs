@@ -118,11 +118,13 @@ pub enum AuthorRole {
 #[serde(rename_all = "snake_case")]
 pub enum DownloadState {
     Searching,
+    Submitting,
     Grabbed,
     Downloading,
     Importing,
     Imported,
     Failed,
+    Conflict,
 }
 
 #[cfg(test)]
@@ -191,11 +193,13 @@ mod tests {
 
     #[rstest]
     #[case(DownloadState::Searching, "\"searching\"")]
+    #[case(DownloadState::Submitting, "\"submitting\"")]
     #[case(DownloadState::Grabbed, "\"grabbed\"")]
     #[case(DownloadState::Downloading, "\"downloading\"")]
     #[case(DownloadState::Importing, "\"importing\"")]
     #[case(DownloadState::Imported, "\"imported\"")]
     #[case(DownloadState::Failed, "\"failed\"")]
+    #[case(DownloadState::Conflict, "\"conflict\"")]
     fn download_state_serializes(#[case] variant: DownloadState, #[case] expected: &str) {
         assert_eq!(serde_json::to_string(&variant).unwrap(), expected);
     }
